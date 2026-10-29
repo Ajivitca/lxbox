@@ -1,0 +1,146 @@
+#!/bin/sh
+# LxBox for Keenetic Router (Entware) Installer
+# Repository: https://github.com/Ajivitca/lxbox
+set -e
+
+REPO_RAW="https://raw.githubusercontent.com/Ajivitca/lxbox/main"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+info()  { echo -e "${GREEN}[+]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
+error() { echo -e "${RED}[-]${NC} $1"; exit 1; }
+
+echo -e "${CYAN}==================================================${NC}"
+echo -e "${GREEN}      LxBox Installer for Keenetic (Entware)      ${NC}"
+echo -e "${CYAN}==================================================${NC}"
+
+# 1. Check for Entware
+if [ ! -d "/opt" ] || [ ! -x "/opt/bin/opkg" ]; then
+    error "Entware is not installed or /opt is missing. Please enable Entware on your Keenetic first!"
+fi
+
+# 2. Detect Architecture
+info "Detecting router architecture..."
+OPKG_ARCH=$(opkg print-architecture 2>/dev/null | grep '_kn' | awk '{print $2}' | sed 's/_kn.*//' || true)
+UNAME_M=$(uname -m 2>/dev/null || echo "unknown")
+
+ARCH_FOLDER=""
+case "$OPKG_ARCH" in
+    *mipsel*|*mipselsf*)
+        ARCH_FOLDER="mipsle"
+        ;;
+    *aarch64*)
+        ARCH_FOLDER="arm64"
+        ;;
+    *arm*|*armv7*)
+        ARCH_FOLDER="armv7"
+        ;;
+    *)
+        # Fallback to uname -m
+        case "$UNAME_M" in
+            mips*|mipsel*)
+                ARCH_FOLDER="mipsle"
+                ;;
+            aarch64*|arm64*)
+                ARCH_FOLDER="arm64"
+                ;;
+            armv7*|arm*)
+                ARCH_FOLDER="armv7"
+                ;;
+            *)
+                error "Unsupported CPU architecture: OPKG='$OPKG_ARCH', uname='$UNAME_M'"
+                ;;
+        esac
+        ;;
+esac
+
+info "Detected architecture: $ARCH_FOLDER (Keenetic Hopper / MT7621 / EN7528 target: $ARCH_FOLDER)"
+
+# 3. Create required directories
+info "Creating directory structure..."
+mkdir -p /opt/sbin /opt/bin /opt/etc/lxbox /opt/etc/lxbox/ui /opt/etc/init.d /opt/var/run /opt/var/log
+
+# 4. Download Core Binary (sing-box-lx)
+info "Downloading sing-box-lx core binary..."
+curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" -o /opt/sbin/sing-box || \
+    wget -qO /opt/sbin/sing-box "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" || \
+    error "Failed to download sing-box core binary"
+chmod +x /opt/sbin/sing-box
+ln -sf /opt/sbin/sing-box /opt/bin/sing-box
+
+# 5. Download CLI Helper binary (lxbox-helper)
+info "Downloading lxbox-helper utility..."
+curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/lxbox-helper" -o /opt/bin/lxbox-helper || \
+    wget -qO /opt/bin/lxbox-helper "${REPO_RAW}/bin/${ARCH_FOLDER}/lxbox-helper" || \
+    error "Failed to download lxbox-helper utility"
+chmod +x /opt/bin/lxbox-helper
+
+# 6. Download CLI Management script (lxbox)
+info "Installing /opt/bin/lxbox CLI command..."
+curl -fSL --retry 3 "${REPO_RAW}/scripts/lxbox" -o /opt/bin/lxbox || \
+    wget -qO /opt/bin/lxbox "${REPO_RAW}/scripts/lxbox" || \
+    error "Failed to download lxbox CLI script"
+chmod +x /opt/bin/lxbox
+
+# 7. Download Init.d service script
+info "Installing /opt/etc/init.d/S99lxbox service..."
+curl -fSL --retry 3 "${REPO_RAW}/scripts/S99lxbox" -o /opt/etc/init.d/S99lxbox || \
+    wget -qO /opt/etc/init.d/S99lxbox "${REPO_RAW}/scripts/S99lxbox" || \
+    error "Failed to download S99lxbox init script"
+chmod +x /opt/etc/init.d/S99lxbox
+
+# 8. Download Web Dashboard UI assets (MetaCubeXD)
+info "Installing MetaCubeXD Web Dashboard..."
+curl -fSL --retry 3 "${REPO_RAW}/ui/metacubexd.tar.gz" -o /tmp/metacubexd.tar.gz 2>/dev/null || true
+if [ -f /tmp/metacubexd.tar.gz ]; then
+    tar -xzf /tmp/metacubexd.tar.gz -C /opt/etc/lxbox/ui
+    rm -f /tmp/metacubexd.tar.gz
+else
+    # Fallback: clone or download snapshot
+    curl -fSL --retry 3 https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.tar.gz | tar -xz --strip-components=1 -C /opt/etc/lxbox/ui 2>/dev/null || true
+fi
+
+# 9. Install default config if not present
+if [ ! -f /opt/etc/lxbox/config.json ]; then
+    info "Installing base configuration template..."
+    curl -fSL --retry 3 "${REPO_RAW}/config/config.json" -o /opt/etc/lxbox/config.json || \
+        wget -qO /opt/etc/lxbox/config.json "${REPO_RAW}/config/config.json"
+else
+    info "Existing configuration found at /opt/etc/lxbox/config.json (preserved)."
+fi
+
+# 10. Install Uninstaller
+curl -fSL --retry 3 "${REPO_RAW}/uninstall.sh" -o /opt/etc/lxbox/uninstall.sh 2>/dev/null || true
+chmod +x /opt/etc/lxbox/uninstall.sh 2>/dev/null || true
+
+# 11. Start service
+info "Starting LxBox service..."
+/opt/etc/init.d/S99lxbox restart || true
+
+ROUTER_IP=$(ip -4 addr show br0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1 || echo "192.168.1.1")
+
+echo -e "\n${GREEN}==================================================${NC}"
+echo -e "${GREEN}       LxBox Successfully Installed!              ${NC}"
+echo -e "${GREEN}==================================================${NC}"
+echo -e "Web Dashboard:  ${CYAN}http://${ROUTER_IP}:9090/ui${NC}"
+echo -e "Clash API:      http://${ROUTER_IP}:9090"
+echo -e "Mixed Proxy:    ${ROUTER_IP}:7890 (SOCKS5/HTTP)"
+echo -e "SOCKS5 Proxy:   ${ROUTER_IP}:10808"
+echo -e "\n${YELLOW}How to import your link (Happ / VLESS / Reality / AWG):${NC}"
+echo -e "  ${CYAN}lxbox import 'vless://...your_link...'${NC}"
+echo -e "  ${CYAN}lxbox import 'happ://crypt...your_link...'${NC}"
+echo -e "  ${CYAN}lxbox import 'https://your_provider.com/sub/...'${NC}"
+echo -e "\n${YELLOW}Useful commands:${NC}"
+echo -e "  ${CYAN}lxbox status${NC}     - View service & memory status"
+echo -e "  ${CYAN}lxbox web${NC}        - Display Web UI link"
+echo -e "  ${CYAN}lxbox test${NC}       - Test proxy connectivity"
+echo -e "  ${CYAN}lxbox log${NC}        - Live log view"
+echo -e "  ${CYAN}lxbox restart${NC}    - Restart service"
+echo -e "  ${CYAN}lxbox uninstall${NC}  - Uninstall LxBox"
+echo -e "${GREEN}==================================================${NC}\n"

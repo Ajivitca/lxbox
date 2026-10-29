@@ -1,0 +1,4 @@
+# Ignore compiled temporary binaries at root
+lxbox-helper
+*.tmp
+*.log

@@ -1,0 +1,159 @@
+#!/bin/sh
+# LxBox CLI Management Utility for Keenetic (Entware)
+# Part of LxBox for Keenetic
+
+CONFIG_FILE="/opt/etc/lxbox/config.json"
+INIT_SCRIPT="/opt/etc/init.d/S99lxbox"
+LOG_FILE="/opt/var/log/lxbox.log"
+HELPER_BIN="/opt/bin/lxbox-helper"
+CORE_BIN="/opt/sbin/sing-box"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+get_router_ip() {
+    ip -4 addr show br0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1 || echo "192.168.1.1"
+}
+
+is_running() {
+    if [ -f /opt/var/run/lxbox.pid ]; then
+        PID=$(cat /opt/var/run/lxbox.pid 2>/dev/null)
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    pidof sing-box >/dev/null 2>&1
+}
+
+cmd_status() {
+    echo -e "${CYAN}=== LxBox System Status ===${NC}"
+    if is_running; then
+        PID=$(cat /opt/var/run/lxbox.pid 2>/dev/null || pidof sing-box | awk '{print $1}')
+        MEM=$(ps | grep "$PID" | grep -v grep | awk '{print $3}' 2>/dev/null)
+        echo -e "Status:     ${GREEN}● RUNNING${NC} (PID: $PID)"
+        [ -n "$MEM" ] && echo -e "Memory:     $MEM VSZ"
+    else
+        echo -e "Status:     ${RED}○ STOPPED${NC}"
+    fi
+
+    echo -e "\n${CYAN}--- Network Ports ---${NC}"
+    echo -e "Clash API:  http://$(get_router_ip):9090"
+    echo -e "Web UI:     ${GREEN}http://$(get_router_ip):9090/ui${NC}"
+    echo -e "Mixed Proxy: 127.0.0.1:7890 (SOCKS5/HTTP)"
+    echo -e "SOCKS5:      127.0.0.1:10808"
+
+    if [ -f "$CONFIG_FILE" ]; then
+        echo -e "\n${CYAN}--- Active Outbounds ---${NC}"
+        grep -E '"tag"|"type"' "$CONFIG_FILE" | grep -B1 '"type": "vless"' -A1 2>/dev/null || true
+    fi
+}
+
+cmd_import() {
+    if [ -z "$1" ]; then
+        echo -e "${RED}Error: link parameter is required!${NC}"
+        echo "Usage: lxbox import '<happ_or_vless_or_subscription_link>'"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}[*] Parsing and importing configuration...${NC}"
+    if [ -x "$HELPER_BIN" ]; then
+        "$HELPER_BIN" import "$1" -c "$CONFIG_FILE"
+        RET=$?
+        if [ $RET -eq 0 ]; then
+            echo -e "${GREEN}[+] Link successfully imported into $CONFIG_FILE${NC}"
+            if is_running; then
+                echo -e "${YELLOW}[*] Reloading LxBox service...${NC}"
+                "$INIT_SCRIPT" restart
+            else
+                echo -e "${YELLOW}[*] Starting LxBox service...${NC}"
+                "$INIT_SCRIPT" start
+            fi
+            echo -e "${GREEN}[✔] Open Web Dashboard to select node: http://$(get_router_ip):9090/ui${NC}"
+        else
+            echo -e "${RED}[-] Failed to import link (code: $RET)${NC}"
+            exit $RET
+        fi
+    else
+        echo -e "${RED}Error: $HELPER_BIN not found or not executable!${NC}"
+        exit 1
+    fi
+}
+
+cmd_test() {
+    echo -e "${YELLOW}[*] Testing connection through local proxy (127.0.0.1:7890)...${NC}"
+    TIME=$(curl -x http://127.0.0.1:7890 -s -o /dev/null -w "%{time_total}s" https://www.google.com/generate_204 2>/dev/null)
+    if [ $? -eq 0 ] && [ -n "$TIME" ]; then
+        echo -e "${GREEN}[✔] Proxy connection OK! Latency: $TIME${NC}"
+    else
+        echo -e "${RED}[✘] Connection failed or timeout! Make sure LxBox is running and an active outbound node is selected.${NC}"
+    fi
+}
+
+cmd_web() {
+    echo -e "${GREEN}Web Dashboard URL:${NC}"
+    echo -e "  ${CYAN}http://$(get_router_ip):9090/ui${NC}\n"
+    echo "Tips: Open this URL in your browser to manage proxies, view traffic, and switch nodes."
+}
+
+case "$1" in
+    import)
+        shift
+        cmd_import "$@"
+        ;;
+    status)
+        cmd_status
+        ;;
+    start)
+        "$INIT_SCRIPT" start
+        ;;
+    stop)
+        "$INIT_SCRIPT" stop
+        ;;
+    restart)
+        "$INIT_SCRIPT" restart
+        ;;
+    reload)
+        "$INIT_SCRIPT" restart
+        ;;
+    check)
+        "$CORE_BIN" check -c "$CONFIG_FILE"
+        ;;
+    log|logs)
+        tail -n 50 -f "$LOG_FILE"
+        ;;
+    web|ui)
+        cmd_web
+        ;;
+    test)
+        cmd_test
+        ;;
+    uninstall)
+        if [ -f /opt/etc/lxbox/uninstall.sh ]; then
+            /bin/sh /opt/etc/lxbox/uninstall.sh
+        else
+            echo "Uninstaller script not found."
+        fi
+        ;;
+    *)
+        echo -e "${CYAN}==========================================${NC}"
+        echo -e "${GREEN}      LxBox for Keenetic Router           ${NC}"
+        echo -e "${CYAN}==========================================${NC}"
+        cmd_status
+        echo -e "\n${YELLOW}Commands:${NC}"
+        echo "  lxbox import '<link>'   - Import Happ, VLESS, Hy2, AWG, or sub link"
+        echo "  lxbox web               - Show Web UI link"
+        echo "  lxbox test              - Test proxy connectivity"
+        echo "  lxbox start             - Start LxBox service"
+        echo "  lxbox stop              - Stop LxBox service"
+        echo "  lxbox restart           - Restart LxBox service"
+        echo "  lxbox check             - Check configuration syntax"
+        echo "  lxbox log               - View live service logs"
+        echo "  lxbox status            - Show service status"
+        echo "  lxbox uninstall         - Uninstall LxBox"
+        echo -e "${CYAN}==========================================${NC}"
+        ;;
+esac

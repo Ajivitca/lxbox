@@ -1,0 +1,111 @@
+#!/bin/sh
+# /opt/etc/init.d/S99lxbox
+# Init script for sing-box-lx (LxBox) on Entware
+
+ENABLED=yes
+PROCS="sing-box"
+ARGS="run -c /opt/etc/lxbox/config.json -D /opt/etc/lxbox"
+PREARGS=""
+DESC="LxBox Core Service"
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CONFIG="/opt/etc/lxbox/config.json"
+PIDFILE="/opt/var/run/lxbox.pid"
+LOGFILE="/opt/var/log/lxbox.log"
+
+. /opt/etc/init.d/rc.func 2>/dev/null || true
+
+check_config() {
+    if [ ! -f "$CONFIG" ]; then
+        echo "Error: Configuration file $CONFIG not found!"
+        return 1
+    fi
+    /opt/sbin/sing-box check -c "$CONFIG" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "Configuration check failed! Run 'sing-box check -c $CONFIG' for details."
+        return 1
+    fi
+    return 0
+}
+
+start() {
+    echo -n "Starting $DESC: "
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE" 2>/dev/null) 2>/dev/null; then
+        echo "already running."
+        return 0
+    fi
+
+    if ! check_config; then
+        echo "failed (invalid config)."
+        return 1
+    fi
+
+    mkdir -p /opt/var/run /opt/var/log
+    # Run sing-box in background
+    /opt/sbin/sing-box $ARGS >> "$LOGFILE" 2>&1 &
+    PID=$!
+    echo $PID > "$PIDFILE"
+
+    sleep 1
+    if kill -0 $PID 2>/dev/null; then
+        echo "done (PID: $PID)."
+    else
+        echo "failed to start! Check $LOGFILE"
+        rm -f "$PIDFILE"
+        return 1
+    fi
+}
+
+stop() {
+    echo -n "Stopping $DESC: "
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE" 2>/dev/null)
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null
+            sleep 1
+            if kill -0 "$PID" 2>/dev/null; then
+                kill -9 "$PID" 2>/dev/null
+            fi
+        fi
+        rm -f "$PIDFILE"
+    fi
+    killall -9 sing-box 2>/dev/null || true
+    echo "done."
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+status() {
+    if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE" 2>/dev/null) 2>/dev/null; then
+        echo "$DESC is running (PID: $(cat $PIDFILE))."
+    else
+        echo "$DESC is stopped."
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    check)
+        check_config && echo "Configuration is valid."
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status|check}"
+        exit 1
+        ;;
+esac
+
+exit 0
