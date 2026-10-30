@@ -204,6 +204,10 @@ func parseHysteria2(raw string) (Outbound, error) {
 
 func parseLink(line string) ([]Outbound, error) {
 	line = strings.TrimSpace(line)
+	if strings.Contains(line, "\n") || strings.Contains(line, "\r") {
+		return parseMultiple(line)
+	}
+
 	if strings.HasPrefix(line, "happ://") {
 		decrypted, err := decryptHapp(line)
 		if err != nil {
@@ -246,6 +250,8 @@ func parseLink(line string) ([]Outbound, error) {
 }
 
 func parseMultiple(content string) ([]Outbound, error) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
 	lines := strings.Split(content, "\n")
 	var result []Outbound
 	for _, l := range lines {

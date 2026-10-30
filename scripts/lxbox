@@ -111,7 +111,31 @@ cmd_web() {
 }
 
 cmd_iface() {
-    ACTION="$1"
+    ARG1="$1"
+    ARG2="$2"
+    
+    IDX=0
+    ACTION="status"
+
+    if [ "$ARG1" -ge 0 ] 2>/dev/null && [ "$ARG1" -le 5 ] 2>/dev/null; then
+        IDX="$ARG1"
+        ACTION="${ARG2:-status}"
+    else
+        ACTION="${ARG1:-status}"
+        if [ "$ARG2" -ge 0 ] 2>/dev/null && [ "$ARG2" -le 5 ] 2>/dev/null; then
+            IDX="$ARG2"
+        fi
+    fi
+
+    IFNAME="Proxy$IDX"
+    PORT=$((10808 + IDX))
+    DESC="LxBox"
+    if [ "$IDX" -eq 0 ]; then
+        DESC="LxBox Master (Failover Pool)"
+    else
+        DESC="LxBox Sub-$IDX"
+    fi
+
     if ! which ndmc >/dev/null 2>&1; then
         echo -e "${RED}Error: 'ndmc' utility not found. This command must be run on KeeneticOS!${NC}"
         return 1
@@ -119,34 +143,37 @@ cmd_iface() {
 
     case "$ACTION" in
         add|enable|on)
-            echo -e "${YELLOW}[*] Configuring KeeneticOS interface Proxy0 for LxBox (127.0.0.1:10808)...${NC}"
-            ndmc -c "interface Proxy0" >/dev/null 2>&1
-            ndmc -c "interface Proxy0 description LxBox" >/dev/null 2>&1
-            ndmc -c "interface Proxy0 proxy proto socks5" >/dev/null 2>&1
-            ndmc -c "interface Proxy0 proxy upstream 127.0.0.1 10808" >/dev/null 2>&1
-            ndmc -c "interface Proxy0 proxy socks5-udp" >/dev/null 2>&1
-            ndmc -c "interface Proxy0 ip global auto" >/dev/null 2>&1
-            ndmc -c "interface Proxy0 up" >/dev/null 2>&1
+            echo -e "${YELLOW}[*] Configuring KeeneticOS interface $IFNAME for $DESC (127.0.0.1:$PORT)...${NC}"
+            ndmc -c "interface $IFNAME" >/dev/null 2>&1
+            ndmc -c "interface $IFNAME description \"$DESC\"" >/dev/null 2>&1
+            ndmc -c "interface $IFNAME proxy proto socks5" >/dev/null 2>&1
+            ndmc -c "interface $IFNAME proxy upstream 127.0.0.1 $PORT" >/dev/null 2>&1
+            ndmc -c "interface $IFNAME proxy socks5-udp" >/dev/null 2>&1
+            ndmc -c "interface $IFNAME ip global auto" >/dev/null 2>&1
+            ndmc -c "interface $IFNAME up" >/dev/null 2>&1
             ndmc -c "system configuration save" >/dev/null 2>&1
-            echo -e "${GREEN}[✔] Interface Proxy0 created and enabled!${NC}"
-            echo -e "Now Proxy0 is visible in KeeneticOS Connection Priorities, HydraRoute Neo, and AWG Manager."
+            echo -e "${GREEN}[✔] Interface $IFNAME created and enabled!${NC}"
+            echo -e "Now $IFNAME is visible in KeeneticOS Connection Priorities, HydraRoute Neo, and AWG Manager."
             ;;
         del|disable|off|remove)
-            echo -e "${YELLOW}[*] Removing KeeneticOS interface Proxy0...${NC}"
-            ndmc -c "no interface Proxy0" >/dev/null 2>&1
+            echo -e "${YELLOW}[*] Removing KeeneticOS interface $IFNAME...${NC}"
+            ndmc -c "no interface $IFNAME" >/dev/null 2>&1
             ndmc -c "system configuration save" >/dev/null 2>&1
-            echo -e "${GREEN}[✔] Interface Proxy0 removed from KeeneticOS.${NC}"
+            echo -e "${GREEN}[✔] Interface $IFNAME removed from KeeneticOS.${NC}"
             ;;
         status|show|*)
-            echo -e "${CYAN}=== Keenetic Interface Proxy0 Status ===${NC}"
-            STATUS=$(ndmc -c "show interface Proxy0" 2>/dev/null)
-            if echo "$STATUS" | grep -q "Proxy0" && ! echo "$STATUS" | grep -q "unable to find"; then
-                echo -e "Status: ${GREEN}● ACTIVE${NC}"
-                echo "$STATUS" | grep -E "description|state|proto|upstream|address" | sed 's/^[ \t]*/  /'
-            else
-                echo -e "Status: ${YELLOW}○ NOT CONFIGURED${NC}"
-                echo "Run 'lxbox iface add' to register LxBox as a KeeneticOS network interface."
-            fi
+            echo -e "${CYAN}=== Keenetic Interfaces (Proxy0..Proxy5) ===${NC}"
+            for i in 0 1 2 3 4 5; do
+                P="Proxy$i"
+                PRT=$((10808 + i))
+                STATUS=$(ndmc -c "show interface $P" 2>/dev/null)
+                if echo "$STATUS" | grep -q "$P" && ! echo "$STATUS" | grep -q "unable to find"; then
+                    echo -e "  $P (port $PRT): ${GREEN}● ACTIVE${NC}"
+                else
+                    echo -e "  $P (port $PRT): ${YELLOW}○ NOT CONFIGURED${NC}"
+                fi
+            done
+            echo -e "\nUsage: lxbox iface [0-5] [add|del]"
             ;;
     esac
 }

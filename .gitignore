@@ -2,3 +2,4 @@
 /lxbox-helper
 *.tmp
 *.log
+bin/armv7/sing-box

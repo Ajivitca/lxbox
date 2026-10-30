@@ -19,10 +19,12 @@ fi
 killall -9 sing-box 2>/dev/null || true
 killall -9 lxbox-helper 2>/dev/null || true
 
-# Remove Keenetic interface Proxy0 if configured
+# Remove Keenetic interfaces Proxy0..Proxy5 if configured
 if which ndmc >/dev/null 2>&1; then
-    echo -e "${YELLOW}[*] Removing KeeneticOS Proxy0 interface...${NC}"
-    ndmc -c "no interface Proxy0" >/dev/null 2>&1 || true
+    echo -e "${YELLOW}[*] Removing KeeneticOS Proxy0..Proxy5 interfaces...${NC}"
+    for i in 0 1 2 3 4 5; do
+        ndmc -c "no interface Proxy$i" >/dev/null 2>&1 || true
+    done
     ndmc -c "system configuration save" >/dev/null 2>&1 || true
 fi
 

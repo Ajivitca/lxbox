@@ -115,13 +115,31 @@ lxbox import 'awg://...'
 
 LxBox for Keenetic provides two integrated web interfaces:
 
-### 1. Web Management & Importer Center (`:9095`)
+### 1. Web Management, Subscriptions & Watchdog Center (`:9095`)
 👉 **`http://192.168.1.1:9095`**
-* **In-Browser Link Import:** Paste encrypted Happ strings (`happ://crypt...`), VLESS Reality links, Hysteria2, or subscription URLs directly in your browser without opening SSH!
-* **Subscription Auto-Update:** Re-sync with remote provider subscriptions in one click.
-* **KeeneticOS Interface Switch (`Proxy0`):** Enable or remove the router network interface directly from the web page.
-* **Daemon Management:** Restart, stop, start, and validate configuration on the fly.
-* **Navigation Links:** Quick links to jump between MetaCubeXD (`:9090/ui`) and AWG Manager (`:2222`).
+
+Organized into 4 intuitive tabs:
+1. **Subscriptions & Nodes:**
+   * **Multi-Subscription Support (Up to 5):** Add and manage up to 5 concurrent independent subscriptions (`sub-1`..`sub-5`) or lists of links (Happ, VLESS Reality, Hy2, WireGuard).
+   * **Failover Pool Checkboxes:** In each subscription table, check or uncheck individual nodes to include or exclude them from the automated monitoring and failover pool. Quick "Select All" and "Deselect All" buttons are available.
+   * **Manual Active Node Selector:** Click "Make Active" to immediately route traffic through any node.
+   * **Status & Latency Badges:** Live indicators (*Healthy*, *Frozen* with countdown timer, *Dead*, *Unchecked*) and measured latency (ms).
+2. **Watchdog & Auto-Failover:**
+   * **Automated Tunnel Health Check:** Probes the active tunnel every $N$ seconds (default 30s) and conducts background pool audits every 300s.
+   * **Real-world Target Probing:** Performs HTTP pings against test targets (`https://instagram.com`, `https://x.com`, `https://grok.ai`, `https://cp.cloudflare.com/generate_204`) and TCP/DNS checks (`9.9.9.9:53`) through the active tunnel.
+   * **Failure Threshold & Retry Delay:** Configurable retry count (default 3 attempts) and pause between retries (default 3s) before declaring a failure.
+   * **Frozen Server Quarantine:** Failed nodes are automatically frozen for $N$ hours (default 2h) to prevent failover flapping back to dead servers.
+   * **Pre-Switch Verification («Check before switching»):** Before switching traffic to a candidate node, the watchdog **probes the candidate first** via Clash API (`/proxies/<tag>/delay`) to confirm it is alive! Only verified healthy servers are activated.
+   * **Seamless Live Switching:** Active node switching is executed via Clash API (`PUT /proxies/select`), eliminating the need to restart the daemon or drop existing TCP sockets.
+   * **Live Event Stream:** Timestamped logging of checks, latencies, failure counters, freezes, and failovers.
+   * **Instant Check Button:** Perform on-demand tests without waiting for the timer.
+3. **Keenetic Network Interfaces (`Proxy0`..`Proxy5`):**
+   * Manage NDMS proxy interfaces in KeeneticOS with a single click.
+   * Enable or disable `Proxy0` (Port 10808, Master Failover Pool) and `Proxy1`..`Proxy5` (Ports 10809..10813, Subscriptions 1..5).
+4. **Core & Service:**
+   * Live status of `sing-box-lx`, PID, memory, listening ports, restart controls, and config syntax check.
+
+---
 
 ### 2. MetaCubeXD Dashboard (`:9090/ui`)
 👉 **`http://192.168.1.1:9090/ui`**
@@ -141,41 +159,57 @@ Frequently Asked: *«Can I add LxBox as a plugin into AWG Manager, or replace AW
 2. **No Happ Decryption:** AWG Manager's parser does not have the RSA PKCS#1 v1.5 private keys required to decrypt Happ links (`happ://crypt...`), nor the XHTTP and post-quantum patches in `sing-box-lx`.
 3. **No External Plugin Architecture:** AWG Manager's web interface is a pre-compiled single binary.
 
-### ✅ Recommended Architecture: Zero-Collision Integration via `Proxy0`
-Instead of modifying AWG Manager, we register LxBox as an official **KeeneticOS network interface** (`interface Proxy0`):
+### ✅ Recommended Architecture: Zero-Collision Multi-Proxy via `Proxy0`..`Proxy5`
+Instead of modifying AWG Manager, we register LxBox outbounds as native **KeeneticOS network interfaces** (`interface Proxy0`..`Proxy5`):
 
 ```
- ┌────────────────────────────────────────────────────────────────────────┐
- │                           KeeneticOS                                   │
- │                                                                        │
- │  ┌───────────────────────┐             ┌─────────────────────────────┐ │
- │  │      AWG Manager      │             │        LxBox Daemon         │ │
- │  │    (Port 2222: Web)   │             │   (Port 9095: Web Import)   │ │
- │  │   WireGuard Tunnels   │             │   (Port 9090: MetaCubeXD)   │ │
- │  └───────────┬───────────┘             └──────────────┬──────────────┘ │
- │              │ nwg0 / awg0                            │ SOCKS5 :10808  │
- │              ▼                                        ▼                │
- │       [AWG Interface]                      [Proxy0 Interface]          │
- │              │                                        │                │
- │              └───────────────────┬────────────────────┘                │
- │                                  ▼                                     │
- │                   HydraRoute Neo / Keenetic Policies                   │
- │                     (Per-Domain Split Tunneling)                       │
- └────────────────────────────────────────────────────────────────────────┘
+ ┌────────────────────────────────────────────────────────────────────────────────────────┐
+ │                                       KeeneticOS                                       │
+ │                                                                                        │
+ │  ┌───────────────────────┐                    ┌──────────────────────────────────────┐ │
+ │  │      AWG Manager      │                    │             LxBox Daemon             │ │
+ │  │    (Port 2222: Web)   │                    │   (Port 9095: Subscriptions & WD)    │ │
+ │  │   WireGuard Tunnels   │                    │   (Port 9090: MetaCubeXD)            │ │
+ │  └───────────┬───────────┘                    └──────────────────┬───────────────────┘ │
+ │              │ nwg0 / awg0                                       │                     │
+ │              │                                ┌──────────────────┴──────────────────┐  │
+ │              │                                │ Port 10808: Master Failover Pool    │  │
+ │              │                                │ Port 10809: Sub-1 Select            │  │
+ │              │                                │ Port 10810: Sub-2 Select            │  │
+ │              ▼                                └──────────────────┬──────────────────┘  │
+ │       [AWG Interface]                                            ▼                     │
+ │              │                                         [Proxy0, Proxy1..Proxy5]        │
+ │              │                                                   │                     │
+ │              └────────────────────────┬──────────────────────────┘                     │
+ │                                       ▼                                                │
+ │                        HydraRoute Neo / Keenetic Policies                              │
+ │                           (Per-Domain Split Tunneling)                                 │
+ └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+#### Port & Interface Mapping:
+| Keenetic Interface | SOCKS5 Port | Purpose | Description |
+|---|---|---|---|
+| **`Proxy0`** | `127.0.0.1:10808` | **Master Failover Pool** | Managed by Watchdog, auto-failover among selected pool nodes |
+| **`Proxy1`** | `127.0.0.1:10809` | **Subscription 1 (Sub-1)** | Dedicated outbound for first subscription |
+| **`Proxy2`** | `127.0.0.1:10810` | **Subscription 2 (Sub-2)** | Dedicated outbound for second subscription |
+| **`Proxy3`** | `127.0.0.1:10811` | **Subscription 3 (Sub-3)** | Dedicated outbound for third subscription |
+| **`Proxy4`** | `127.0.0.1:10812` | **Subscription 4 (Sub-4)** | Dedicated outbound for fourth subscription |
+| **`Proxy5`** | `127.0.0.1:10813` | **Subscription 5 (Sub-5)** | Dedicated outbound for fifth subscription |
 
 #### Setup in 2 Easy Steps:
 
-1. **Enable the `Proxy0` Interface:**  
-   Click **«Enable Proxy0»** in the Web UI (`http://192.168.1.1:9095`) or run via SSH:
+1. **Enable the Interfaces:**  
+   Click **«Enable»** next to desired interfaces in the Web UI (`http://192.168.1.1:9095`) or run via SSH:
    ```sh
-   lxbox iface add
+   lxbox iface 0 add   # Enable Proxy0 (Master Failover Pool)
+   lxbox iface 1 add   # Enable Proxy1 (Sub-1)
    ```
-   KeeneticOS creates an official system interface `Proxy0` pointing to LxBox SOCKS5 (`127.0.0.1:10808`).
+   KeeneticOS registers official system interfaces `Proxy0`..`Proxy5`.
 
 2. **Route Traffic in HydraRoute Neo or AWG Manager:**
-   * **In AWG Manager / HydraRoute Neo:** Open your domain lists (YouTube, Discord, RuTracker, blocked sites) and set the target to **`Proxy0`** or the policy containing `Proxy0`.
-   * **In KeeneticOS Web UI («Connection Priorities»):** `Proxy0` (LxBox) appears in the Internet connections list — drag it to any policy or assign it to specific home devices.
+   * **In AWG Manager / HydraRoute Neo:** Open your domain lists (YouTube, Discord, RuTracker, blocked sites) and set the target to **`Proxy0`** (for watchdog failover) or any specific `Proxy1`..`Proxy5`.
+   * **In KeeneticOS Web UI («Connection Priorities»):** `Proxy0`..`Proxy5` appear in the Internet connections list — drag them into policies or assign them directly to specific home devices.
 
 **Major Advantage:**  
 Both AWG Manager and LxBox can be upgraded independently at any time without config collisions or file overwrites.
@@ -184,7 +218,7 @@ Both AWG Manager and LxBox can be upgraded independently at any time without con
 
 ## 🛠 CLI Management (`lxbox`)
 
-In the router SSH console, run `lxbox` to view live service status, memory usage, and listening ports:
+In the router SSH console, run `lxbox` to view live service status, memory usage, and listening interfaces:
 
 ```sh
 lxbox
@@ -193,8 +227,9 @@ lxbox
 | Command | Description |
 |---|---|
 | `lxbox import '<link>'` | Ingest Happ, VLESS, Hy2, AWG, or subscription URLs |
-| `lxbox iface [add\|del]` | Enable or remove KeeneticOS Proxy0 system interface |
-| `lxbox status` | Show service status, PID, memory usage, ports, and Proxy0 |
+| `lxbox iface [0-5] [add\|del]` | Enable or remove KeeneticOS Proxy0..Proxy5 system interfaces |
+| `lxbox iface` | Show current status of Proxy0..Proxy5 interfaces |
+| `lxbox status` | Show service status, PID, memory usage, ports, and interfaces |
 | `lxbox web` | Display Web UI URLs (:9095, :9090, :2222) |
 | `lxbox test` | Test proxy connection and check latency |
 | `lxbox log` | Follow live service logs (`tail -f`) |
