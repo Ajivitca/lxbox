@@ -105,6 +105,8 @@ else
     # Fallback: clone or download snapshot
     curl -fSL --retry 3 https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.tar.gz | tar -xz --strip-components=1 -C /opt/etc/lxbox/ui 2>/dev/null || true
 fi
+# Auto-configure MetaCubeXD to connect to router host automatically
+echo "window.__METACUBEXD_CONFIG__ = { defaultBackendURL: window.location.origin, githubToken: '' };" > /opt/etc/lxbox/ui/config.js
 
 # 9. Install default config if not present
 if [ ! -f /opt/etc/lxbox/config.json ]; then

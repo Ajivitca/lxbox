@@ -42,7 +42,7 @@ cmd_status() {
 
     echo -e "\n${CYAN}--- Web & Network Ports ---${NC}"
     echo -e "Web Management: ${GREEN}http://$(get_router_ip):9095${NC} (Import links & subscriptions)"
-    echo -e "Dashboard UI:   ${CYAN}http://$(get_router_ip):9090/ui${NC} (MetaCubeXD node switcher)"
+    echo -e "Dashboard UI:   ${CYAN}http://$(get_router_ip):9090/ui/?hostname=$(get_router_ip)&port=9090${NC} (MetaCubeXD, secret is empty)"
     echo -e "Clash API:      http://$(get_router_ip):9090"
     echo -e "Mixed Proxy:    127.0.0.1:7890 (SOCKS5/HTTP)"
     echo -e "SOCKS5:         127.0.0.1:10808"
@@ -105,7 +105,7 @@ cmd_test() {
 cmd_web() {
     echo -e "${GREEN}=== Web Interfaces ===${NC}"
     echo -e "  Management & Import UI: ${CYAN}http://$(get_router_ip):9095${NC}"
-    echo -e "  MetaCubeXD Dashboard:   ${CYAN}http://$(get_router_ip):9090/ui${NC}"
+    echo -e "  MetaCubeXD Dashboard:   ${CYAN}http://$(get_router_ip):9090/ui/?hostname=$(get_router_ip)&port=9090${NC} (secret: leave empty)"
     echo -e "  AWG Manager:            ${CYAN}http://$(get_router_ip):2222${NC}\n"
     echo "Tips: Open http://$(get_router_ip):9095 to import Happ/VLESS links directly in your browser!"
 }

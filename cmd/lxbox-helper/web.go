@@ -925,7 +925,7 @@ https://grok.ai</textarea>
 
   <script>
     const host = window.location.hostname || "192.168.1.1";
-    document.getElementById("clashUiLink").href = "http://" + host + ":9090/ui";
+    document.getElementById("clashUiLink").href = "http://" + host + ":9090/ui/?hostname=" + host + "&port=9090";
     document.getElementById("awgLink").href = "http://" + host + ":2222";
     document.getElementById("knLink").href = "http://" + host;
 
