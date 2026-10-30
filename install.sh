@@ -62,49 +62,70 @@ esac
 
 info "Detected architecture: $ARCH_FOLDER (Keenetic Hopper / MT7621 / EN7528 target: $ARCH_FOLDER)"
 
-# 3. Create required directories
-info "Creating directory structure..."
-mkdir -p /opt/sbin /opt/bin /opt/etc/lxbox /opt/etc/lxbox/ui /opt/etc/init.d /opt/var/run /opt/var/log
+# 3. Stop running services and processes (prevent 'Text file busy')
+info "Stopping any running LxBox processes..."
+if [ -x "/opt/etc/init.d/S99lxbox" ]; then
+    /opt/etc/init.d/S99lxbox stop >/dev/null 2>&1 || true
+fi
+killall -9 sing-box >/dev/null 2>&1 || true
+killall -9 lxbox-helper >/dev/null 2>&1 || true
+sleep 1
 
-# 4. Download Core Binary (sing-box-lx)
+# 4. Create required directories
+info "Creating directory structure..."
+mkdir -p /opt/sbin /opt/bin /opt/etc/lxbox /opt/etc/lxbox/ui /opt/etc/init.d /opt/var/run /opt/var/log /tmp
+
+# 5. Download Core Binary (sing-box-lx)
 info "Downloading sing-box-lx core binary..."
+rm -f /tmp/sing-box.new /tmp/sing-box.gz
 if [ "$ARCH_FOLDER" = "armv7" ]; then
     info "Downloading armv7 release package..."
     curl -fSL --retry 3 "https://github.com/Ajivitca/lxbox/releases/download/v2.25.18/sing-box-linux-armv7.gz" -o /tmp/sing-box.gz 2>/dev/null || \
         wget -qO /tmp/sing-box.gz "https://github.com/Ajivitca/lxbox/releases/download/v2.25.18/sing-box-linux-armv7.gz" || \
         error "Failed to download sing-box armv7 binary"
-    gzip -d -c /tmp/sing-box.gz > /opt/sbin/sing-box
+    gzip -d -c /tmp/sing-box.gz > /tmp/sing-box.new
     rm -f /tmp/sing-box.gz
 else
-    curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" -o /opt/sbin/sing-box || \
-        wget -qO /opt/sbin/sing-box "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" || \
+    curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" -o /tmp/sing-box.new || \
+        wget -qO /tmp/sing-box.new "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" || \
         error "Failed to download sing-box core binary"
 fi
-chmod +x /opt/sbin/sing-box
+chmod +x /tmp/sing-box.new
+rm -f /opt/sbin/sing-box /opt/bin/sing-box
+mv -f /tmp/sing-box.new /opt/sbin/sing-box
 ln -sf /opt/sbin/sing-box /opt/bin/sing-box
 
-# 5. Download CLI Helper binary (lxbox-helper)
+# 6. Download CLI Helper binary (lxbox-helper)
 info "Downloading lxbox-helper utility..."
-curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/lxbox-helper" -o /opt/bin/lxbox-helper || \
-    wget -qO /opt/bin/lxbox-helper "${REPO_RAW}/bin/${ARCH_FOLDER}/lxbox-helper" || \
+rm -f /tmp/lxbox-helper.new
+curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/lxbox-helper" -o /tmp/lxbox-helper.new || \
+    wget -qO /tmp/lxbox-helper.new "${REPO_RAW}/bin/${ARCH_FOLDER}/lxbox-helper" || \
     error "Failed to download lxbox-helper utility"
-chmod +x /opt/bin/lxbox-helper
+chmod +x /tmp/lxbox-helper.new
+rm -f /opt/bin/lxbox-helper
+mv -f /tmp/lxbox-helper.new /opt/bin/lxbox-helper
 
-# 6. Download CLI Management script (lxbox)
+# 7. Download CLI Management script (lxbox)
 info "Installing /opt/bin/lxbox CLI command..."
-curl -fSL --retry 3 "${REPO_RAW}/scripts/lxbox" -o /opt/bin/lxbox || \
-    wget -qO /opt/bin/lxbox "${REPO_RAW}/scripts/lxbox" || \
+rm -f /tmp/lxbox.new
+curl -fSL --retry 3 "${REPO_RAW}/scripts/lxbox" -o /tmp/lxbox.new || \
+    wget -qO /tmp/lxbox.new "${REPO_RAW}/scripts/lxbox" || \
     error "Failed to download lxbox CLI script"
-chmod +x /opt/bin/lxbox
+chmod +x /tmp/lxbox.new
+rm -f /opt/bin/lxbox
+mv -f /tmp/lxbox.new /opt/bin/lxbox
 
-# 7. Download Init.d service script
+# 8. Download Init.d service script
 info "Installing /opt/etc/init.d/S99lxbox service..."
-curl -fSL --retry 3 "${REPO_RAW}/scripts/S99lxbox" -o /opt/etc/init.d/S99lxbox || \
-    wget -qO /opt/etc/init.d/S99lxbox "${REPO_RAW}/scripts/S99lxbox" || \
+rm -f /tmp/S99lxbox.new
+curl -fSL --retry 3 "${REPO_RAW}/scripts/S99lxbox" -o /tmp/S99lxbox.new || \
+    wget -qO /tmp/S99lxbox.new "${REPO_RAW}/scripts/S99lxbox" || \
     error "Failed to download S99lxbox init script"
-chmod +x /opt/etc/init.d/S99lxbox
+chmod +x /tmp/S99lxbox.new
+rm -f /opt/etc/init.d/S99lxbox
+mv -f /tmp/S99lxbox.new /opt/etc/init.d/S99lxbox
 
-# 8. Download Web Dashboard UI assets (MetaCubeXD)
+# 9. Download Web Dashboard UI assets (MetaCubeXD)
 info "Installing MetaCubeXD Web Dashboard..."
 curl -fSL --retry 3 "${REPO_RAW}/ui/metacubexd.tar.gz" -o /tmp/metacubexd.tar.gz 2>/dev/null || true
 if [ -f /tmp/metacubexd.tar.gz ]; then
@@ -117,7 +138,7 @@ fi
 # Auto-configure MetaCubeXD to connect to router host automatically
 echo "window.__METACUBEXD_CONFIG__ = { defaultBackendURL: window.location.origin, githubToken: '' };" > /opt/etc/lxbox/ui/config.js
 
-# 9. Install default config if not present
+# 10. Install default config if not present
 if [ ! -f /opt/etc/lxbox/config.json ]; then
     info "Installing base configuration template..."
     curl -fSL --retry 3 "${REPO_RAW}/config/config.json" -o /opt/etc/lxbox/config.json || \
@@ -126,11 +147,11 @@ else
     info "Existing configuration found at /opt/etc/lxbox/config.json (preserved)."
 fi
 
-# 10. Install Uninstaller
+# 11. Install Uninstaller
 curl -fSL --retry 3 "${REPO_RAW}/uninstall.sh" -o /opt/etc/lxbox/uninstall.sh 2>/dev/null || true
 chmod +x /opt/etc/lxbox/uninstall.sh 2>/dev/null || true
 
-# 11. Start service
+# 12. Start service
 info "Starting LxBox service..."
 /opt/etc/init.d/S99lxbox restart || true
 
