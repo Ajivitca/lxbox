@@ -43,6 +43,7 @@ type Subscription struct {
 // SubscriptionsManager manages persistent storage and config generation for up to 5 subscriptions
 type SubscriptionsManager struct {
 	mu            sync.RWMutex
+	rebuildMu     sync.Mutex
 	filePath      string
 	configPath    string
 	Subscriptions []*Subscription `json:"subscriptions"`
@@ -397,6 +398,9 @@ func (m *SubscriptionsManager) SetActiveNode(subID, nodeTag string) error {
 // - Master selector group containing all nodes marked EnabledInPool
 // - Subscription-specific selector groups
 func (m *SubscriptionsManager) RebuildSingboxConfig() error {
+	m.rebuildMu.Lock()
+	defer m.rebuildMu.Unlock()
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -442,8 +446,27 @@ func (m *SubscriptionsManager) RebuildSingboxConfig() error {
 	}
 	cfg["inbounds"] = inbounds
 
+	// Ensure standard modern DNS config
+	cfg["dns"] = map[string]interface{}{
+		"servers": []interface{}{
+			map[string]interface{}{
+				"tag":     "remote-dns",
+				"address": "tls://1.1.1.1",
+				"detour":  "select",
+			},
+			map[string]interface{}{
+				"tag":     "local-dns",
+				"address": "local",
+				"detour":  "direct",
+			},
+		},
+		"final":    "local-dns",
+		"strategy": "prefer_ipv4",
+	}
+
 	// Collect pool nodes and sub nodes
 	var masterPoolTags []string
+	seenMaster := make(map[string]bool)
 	subSelectors := make(map[string][]string)
 	allOutboundsMap := make(map[string]map[string]interface{})
 
@@ -454,12 +477,25 @@ func (m *SubscriptionsManager) RebuildSingboxConfig() error {
 			continue
 		}
 		var subTags []string
+		seenSub := make(map[string]bool)
 		for _, n := range s.Nodes {
 			tag := n.Tag
-			subTags = append(subTags, tag)
+			if tag == "" || n.RawOutbound == nil {
+				continue
+			}
+			tp, _ := n.RawOutbound["type"].(string)
+			if tp == "loopback" || tp == "direct" || tp == "block" || tp == "dns" {
+				continue
+			}
+
+			if !seenSub[tag] {
+				seenSub[tag] = true
+				subTags = append(subTags, tag)
+			}
 			allOutboundsMap[tag] = n.RawOutbound
 
-			if n.EnabledInPool {
+			if n.EnabledInPool && !seenMaster[tag] {
+				seenMaster[tag] = true
 				masterPoolTags = append(masterPoolTags, tag)
 			}
 			if n.IsActive {
@@ -474,7 +510,7 @@ func (m *SubscriptionsManager) RebuildSingboxConfig() error {
 	}
 
 	defaultTag := "direct"
-	if activeNodeTag != "" {
+	if activeNodeTag != "" && seenMaster[activeNodeTag] {
 		defaultTag = activeNodeTag
 	} else if len(masterPoolTags) > 0 && masterPoolTags[0] != "direct" {
 		defaultTag = masterPoolTags[0]
@@ -512,6 +548,7 @@ func (m *SubscriptionsManager) RebuildSingboxConfig() error {
 	outbounds = append(outbounds,
 		map[string]interface{}{"type": "direct", "tag": "direct"},
 		map[string]interface{}{"type": "block", "tag": "block"},
+		map[string]interface{}{"type": "dns", "tag": "dns-out"},
 	)
 
 	// Add all raw node outbounds
@@ -524,7 +561,7 @@ func (m *SubscriptionsManager) RebuildSingboxConfig() error {
 	rules := []interface{}{
 		map[string]interface{}{
 			"protocol": "dns",
-			"action":   "hijack-dns",
+			"outbound": "dns-out",
 		},
 		map[string]interface{}{
 			"ip_is_private": true,
@@ -543,10 +580,9 @@ func (m *SubscriptionsManager) RebuildSingboxConfig() error {
 	}
 
 	cfg["route"] = map[string]interface{}{
-		"auto_detect_interface":   true,
-		"default_domain_resolver": "local-dns",
-		"rules":                   rules,
-		"final":                   "select",
+		"auto_detect_interface": true,
+		"rules":                 rules,
+		"final":                 "select",
 	}
 
 	outBytes, err := json.MarshalIndent(cfg, "", "  ")

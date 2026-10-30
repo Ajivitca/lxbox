@@ -249,7 +249,12 @@ func convertXrayOutboundToSingbox(xrayOb map[string]interface{}, defaultTag stri
 		tag = proto
 	}
 
-	if proto == "freedom" || proto == "blackhole" || proto == "dns" || proto == "direct" || proto == "block" {
+	allowed := map[string]bool{
+		"vless": true, "vmess": true, "trojan": true, "shadowsocks": true,
+		"hysteria": true, "hysteria2": true, "hy2": true, "socks": true,
+		"http": true, "wireguard": true, "tuic": true,
+	}
+	if !allowed[proto] {
 		return nil, fmt.Errorf("non-proxy protocol: %s", proto)
 	}
 
@@ -339,6 +344,20 @@ func convertXrayOutboundToSingbox(xrayOb map[string]interface{}, defaultTag stri
 		ob["method"] = method
 		ob["password"] = pwd
 
+	case "hysteria", "hysteria2", "hy2":
+		ob["type"] = proto
+		if srv, ok := settings["address"].(string); ok {
+			ob["server"] = srv
+		}
+		if prt, ok := settings["port"]; ok {
+			ob["server_port"] = getInt(prt, 443)
+		}
+		if auth, ok := settings["auth_str"].(string); ok {
+			ob["password"] = auth
+		}
+		ob["up_mbps"] = 100
+		ob["down_mbps"] = 100
+
 	default:
 		ob["type"] = proto
 		if srv, ok := settings["address"].(string); ok {
@@ -384,6 +403,17 @@ func convertXrayOutboundToSingbox(xrayOb map[string]interface{}, defaultTag stri
 				}
 			}
 			ob["transport"] = huMap
+		case "xhttp":
+			httpMap := map[string]interface{}{"type": "http"}
+			if xhttpSettings, ok := streamSettings["xhttpSettings"].(map[string]interface{}); ok {
+				if p, ok := xhttpSettings["path"].(string); ok && p != "" {
+					httpMap["path"] = p
+				}
+				if h, ok := xhttpSettings["host"].(string); ok && h != "" {
+					httpMap["host"] = []string{h}
+				}
+			}
+			ob["transport"] = httpMap
 		}
 
 		if strings.EqualFold(sec, "tls") {
@@ -406,15 +436,13 @@ func convertXrayOutboundToSingbox(xrayOb map[string]interface{}, defaultTag stri
 		} else if strings.EqualFold(sec, "reality") {
 			tlsMap := map[string]interface{}{"enabled": true}
 			realityMap := map[string]interface{}{"enabled": true}
+			fp := "chrome"
 			if realitySettings, ok := streamSettings["realitySettings"].(map[string]interface{}); ok {
 				if sn, ok := realitySettings["serverName"].(string); ok && sn != "" {
 					tlsMap["server_name"] = sn
 				}
-				if fp, ok := realitySettings["fingerprint"].(string); ok && fp != "" {
-					tlsMap["utls"] = map[string]interface{}{
-						"enabled":     true,
-						"fingerprint": fp,
-					}
+				if f, ok := realitySettings["fingerprint"].(string); ok && f != "" {
+					fp = f
 				}
 				if pbk, ok := realitySettings["publicKey"].(string); ok {
 					realityMap["public_key"] = pbk
@@ -422,9 +450,10 @@ func convertXrayOutboundToSingbox(xrayOb map[string]interface{}, defaultTag stri
 				if sid, ok := realitySettings["shortId"].(string); ok {
 					realityMap["short_id"] = sid
 				}
-				if spx, ok := realitySettings["spiderX"].(string); ok {
-					realityMap["spider_x"] = spx
-				}
+			}
+			tlsMap["utls"] = map[string]interface{}{
+				"enabled":     true,
+				"fingerprint": fp,
 			}
 			tlsMap["reality"] = realityMap
 			ob["tls"] = tlsMap
@@ -537,6 +566,33 @@ func convertClashProxyToSingbox(p map[string]interface{}) (Outbound, error) {
 }
 
 func parseJSONSubscription(content string) ([]Outbound, error) {
+	tagCounts := make(map[string]int)
+	dedupTag := func(baseTag string) string {
+		baseTag = strings.TrimSpace(baseTag)
+		if baseTag == "" {
+			baseTag = "node"
+		}
+		tagCounts[baseTag]++
+		if tagCounts[baseTag] > 1 {
+			return fmt.Sprintf("%s (%d)", baseTag, tagCounts[baseTag])
+		}
+		return baseTag
+	}
+
+	isDummyNode := func(ob Outbound) bool {
+		srv, _ := ob["server"].(string)
+		srv = strings.TrimSpace(srv)
+		if srv == "" || srv == "127.0.0.1" || srv == "0.0.0.0" {
+			return true
+		}
+		tag, _ := ob["tag"].(string)
+		tLower := strings.ToLower(tag)
+		if strings.Contains(tLower, "трафик") || strings.Contains(tLower, "использовано") || strings.Contains(tLower, "остаток") {
+			return true
+		}
+		return false
+	}
+
 	var arr []interface{}
 	if err := json.Unmarshal([]byte(content), &arr); err == nil {
 		var result []Outbound
@@ -546,27 +602,46 @@ func parseJSONSubscription(content string) ([]Outbound, error) {
 				continue
 			}
 			remarks, _ := m["remarks"].(string)
+			remarks = strings.TrimSpace(remarks)
+			if remarks == "" {
+				remarks = "node"
+			}
+
 			if outboundsRaw, ok := m["outbounds"].([]interface{}); ok {
+				var itemProxies []Outbound
 				for _, obRaw := range outboundsRaw {
 					if obMap, ok := obRaw.(map[string]interface{}); ok {
 						if converted, err := convertXrayOutboundToSingbox(obMap, remarks); err == nil {
-							result = append(result, converted)
+							if !isDummyNode(converted) {
+								itemProxies = append(itemProxies, converted)
+							}
 						}
 					}
+				}
+				for _, ob := range itemProxies {
+					ob["tag"] = dedupTag(remarks)
+					result = append(result, ob)
 				}
 				continue
 			}
 
 			if tp, ok := m["type"].(string); ok && tp != "" {
 				if tp != "direct" && tp != "block" && tp != "dns" && tp != "selector" && tp != "urltest" {
-					result = append(result, Outbound(m))
+					ob := Outbound(m)
+					if !isDummyNode(ob) {
+						ob["tag"] = dedupTag(remarks)
+						result = append(result, ob)
+					}
 					continue
 				}
 			}
 
 			if _, ok := m["server"].(string); ok {
 				if converted, err := convertClashProxyToSingbox(m); err == nil {
-					result = append(result, converted)
+					if !isDummyNode(converted) {
+						converted["tag"] = dedupTag(remarks)
+						result = append(result, converted)
+					}
 					continue
 				}
 			}
@@ -581,15 +656,26 @@ func parseJSONSubscription(content string) ([]Outbound, error) {
 		var result []Outbound
 		if outboundsRaw, ok := obj["outbounds"].([]interface{}); ok {
 			remarks, _ := obj["remarks"].(string)
+			remarks = strings.TrimSpace(remarks)
+			if remarks == "" {
+				remarks = "node"
+			}
 			for _, obRaw := range outboundsRaw {
 				if obMap, ok := obRaw.(map[string]interface{}); ok {
 					if _, hasProto := obMap["protocol"]; hasProto {
 						if converted, err := convertXrayOutboundToSingbox(obMap, remarks); err == nil {
-							result = append(result, converted)
+							if !isDummyNode(converted) {
+								converted["tag"] = dedupTag(remarks)
+								result = append(result, converted)
+							}
 						}
 					} else if tp, ok := obMap["type"].(string); ok && tp != "" {
 						if tp != "direct" && tp != "block" && tp != "dns" && tp != "selector" && tp != "urltest" {
-							result = append(result, Outbound(obMap))
+							ob := Outbound(obMap)
+							if !isDummyNode(ob) {
+								ob["tag"] = dedupTag(remarks)
+								result = append(result, ob)
+							}
 						}
 					}
 				}
@@ -600,7 +686,11 @@ func parseJSONSubscription(content string) ([]Outbound, error) {
 			for _, pRaw := range proxiesRaw {
 				if pMap, ok := pRaw.(map[string]interface{}); ok {
 					if converted, err := convertClashProxyToSingbox(pMap); err == nil {
-						result = append(result, converted)
+						if !isDummyNode(converted) {
+							tag, _ := converted["tag"].(string)
+							converted["tag"] = dedupTag(tag)
+							result = append(result, converted)
+						}
 					}
 				}
 			}
@@ -740,13 +830,12 @@ func ensureConfigTemplate(configPath string) error {
     "servers": [
       {
         "tag": "remote-dns",
-        "type": "tls",
-        "server": "1.1.1.1",
+        "address": "tls://1.1.1.1",
         "detour": "select"
       },
       {
         "tag": "local-dns",
-        "type": "local",
+        "address": "local",
         "detour": "direct"
       }
     ],
@@ -783,15 +872,18 @@ func ensureConfigTemplate(configPath string) error {
     {
       "type": "block",
       "tag": "block"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
     }
   ],
   "route": {
     "auto_detect_interface": true,
-    "default_domain_resolver": "local-dns",
     "rules": [
       {
         "protocol": "dns",
-        "action": "hijack-dns"
+        "outbound": "dns-out"
       },
       {
         "ip_is_private": true,

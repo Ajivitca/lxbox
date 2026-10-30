@@ -554,14 +554,41 @@ func getSingboxPID() int {
 }
 
 func restartSingboxService() error {
-	initScript := "/opt/etc/init.d/S99lxbox"
-	if _, err := os.Stat(initScript); err == nil {
-		return exec.Command(initScript, "restart").Run()
+	configPath := "/opt/etc/lxbox/config.json"
+	logFile := "/opt/var/log/lxbox.log"
+	pidFile := "/opt/var/run/lxbox.pid"
+
+	// 1. Verify config validity first if sing-box binary exists
+	if _, err := exec.LookPath("sing-box"); err == nil {
+		cmd := exec.Command("sing-box", "check", "-c", configPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			LogEvent("fail", "sing-box check failed: %s", string(out))
+			return fmt.Errorf("sing-box check failed: %s", string(out))
+		}
 	}
+
+	// 2. Terminate existing sing-box core only (never touch lxbox-helper)
 	pid := getSingboxPID()
 	if pid > 0 {
-		exec.Command("kill", "-HUP", strconv.Itoa(pid)).Run()
+		_ = exec.Command("kill", strconv.Itoa(pid)).Run()
+		time.Sleep(500 * time.Millisecond)
+		if getSingboxPID() == pid {
+			_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+		}
+	} else {
+		_ = exec.Command("killall", "sing-box").Run()
 	}
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Start sing-box core
+	startCmd := exec.Command("/bin/sh", "-c",
+		fmt.Sprintf("/opt/sbin/sing-box run -c %s -D /opt/etc/lxbox >> %s 2>&1 & echo $! > %s",
+			configPath, logFile, pidFile))
+	if err := startCmd.Run(); err != nil {
+		LogEvent("fail", "failed to start sing-box: %v", err)
+		return err
+	}
+	LogEvent("active", "sing-box core successfully restarted")
 	return nil
 }
 

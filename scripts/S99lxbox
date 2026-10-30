@@ -36,23 +36,21 @@ start() {
         echo "already running."
     else
         if ! check_config; then
-            echo "failed (invalid config)."
-            return 1
-        fi
-
-        mkdir -p /opt/var/run /opt/var/log
-        # Run sing-box in background
-        /opt/sbin/sing-box $ARGS >> "$LOGFILE" 2>&1 &
-        PID=$!
-        echo $PID > "$PIDFILE"
-
-        sleep 1
-        if kill -0 $PID 2>/dev/null; then
-            echo "done (PID: $PID)."
+            echo "warning: invalid config, sing-box core not started."
         else
-            echo "failed to start! Check $LOGFILE"
-            rm -f "$PIDFILE"
-            return 1
+            mkdir -p /opt/var/run /opt/var/log
+            # Run sing-box in background
+            /opt/sbin/sing-box $ARGS >> "$LOGFILE" 2>&1 &
+            PID=$!
+            echo $PID > "$PIDFILE"
+
+            sleep 1
+            if kill -0 $PID 2>/dev/null; then
+                echo "done (PID: $PID)."
+            else
+                echo "failed to start! Check $LOGFILE"
+                rm -f "$PIDFILE"
+            fi
         fi
     fi
 

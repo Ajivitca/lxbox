@@ -8,13 +8,12 @@
     "servers": [
       {
         "tag": "remote-dns",
-        "type": "tls",
-        "server": "1.1.1.1",
+        "address": "tls://1.1.1.1",
         "detour": "select"
       },
       {
         "tag": "local-dns",
-        "type": "local",
+        "address": "local",
         "detour": "direct"
       }
     ],
@@ -51,15 +50,18 @@
     {
       "type": "block",
       "tag": "block"
+    },
+    {
+      "type": "dns",
+      "tag": "dns-out"
     }
   ],
   "route": {
     "auto_detect_interface": true,
-    "default_domain_resolver": "local-dns",
     "rules": [
       {
         "protocol": "dns",
-        "action": "hijack-dns"
+        "outbound": "dns-out"
       },
       {
         "ip_is_private": true,
