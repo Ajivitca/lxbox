@@ -138,13 +138,13 @@ fi
 # Auto-configure MetaCubeXD to connect to router host automatically
 echo "window.__METACUBEXD_CONFIG__ = { defaultBackendURL: window.location.origin, githubToken: '' };" > /opt/etc/lxbox/ui/config.js
 
-# 10. Install default config if not present
-if [ ! -f /opt/etc/lxbox/config.json ]; then
+# 10. Install default config if not present or invalid
+if [ ! -f /opt/etc/lxbox/config.json ] || ! /opt/sbin/sing-box check -c /opt/etc/lxbox/config.json >/dev/null 2>&1; then
     info "Installing base configuration template..."
     curl -fSL --retry 3 "${REPO_RAW}/config/config.json" -o /opt/etc/lxbox/config.json || \
         wget -qO /opt/etc/lxbox/config.json "${REPO_RAW}/config/config.json"
 else
-    info "Existing configuration found at /opt/etc/lxbox/config.json (preserved)."
+    info "Existing configuration found at /opt/etc/lxbox/config.json (valid, preserved)."
 fi
 
 # 11. Install Uninstaller
