@@ -129,9 +129,17 @@ func runWebServer(listenAddr string, configPath string) error {
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
 			return
 		}
+		msg := fmt.Sprintf("Подписка '%s' успешно добавлена! Загружено %d узлов.", sub.Name, len(sub.Nodes))
+		for _, n := range sub.Nodes {
+			tagLower := strings.ToLower(n.Tag)
+			if strings.Contains(tagLower, "лимит") || strings.Contains(tagLower, "привязать") || strings.Contains(tagLower, "обновите") {
+				msg = fmt.Sprintf("⚠️ Подписка добавлена (%d узлов), но сервер сообщает: '%s'. Укажите HWID вашего телефона во вкладке «Профиль & HWID» или сбросьте привязку в боте провайдера.", len(sub.Nodes), n.Tag)
+				break
+			}
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
-			"message": fmt.Sprintf("Подписка '%s' успешно добавлена! Загружено %d узлов.", sub.Name, len(sub.Nodes)),
+			"message": msg,
 			"sub_id":  sub.ID,
 		})
 	})

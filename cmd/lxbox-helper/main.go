@@ -202,10 +202,428 @@ func parseHysteria2(raw string) (Outbound, error) {
 	return ob, nil
 }
 
+func getInt(v interface{}, def int) int {
+	if v == nil {
+		return def
+	}
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case string:
+		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
+	}
+	return def
+}
+
+func tryBase64Decode(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return string(b), true
+	}
+	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return string(b), true
+	}
+	if b, err := base64.URLEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return string(b), true
+	}
+	if b, err := base64.RawURLEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return string(b), true
+	}
+	return "", false
+}
+
+func convertXrayOutboundToSingbox(xrayOb map[string]interface{}, defaultTag string) (Outbound, error) {
+	proto, _ := xrayOb["protocol"].(string)
+	proto = strings.ToLower(proto)
+	tag, _ := xrayOb["tag"].(string)
+	if defaultTag != "" {
+		tag = defaultTag
+	}
+	if tag == "" {
+		tag = proto
+	}
+
+	if proto == "freedom" || proto == "blackhole" || proto == "dns" || proto == "direct" || proto == "block" {
+		return nil, fmt.Errorf("non-proxy protocol: %s", proto)
+	}
+
+	settings, _ := xrayOb["settings"].(map[string]interface{})
+	streamSettings, _ := xrayOb["streamSettings"].(map[string]interface{})
+
+	ob := Outbound{
+		"tag": tag,
+	}
+
+	switch proto {
+	case "vless":
+		ob["type"] = "vless"
+		vnextList, _ := settings["vnext"].([]interface{})
+		if len(vnextList) == 0 {
+			return nil, fmt.Errorf("vless has no vnext")
+		}
+		vnext, _ := vnextList[0].(map[string]interface{})
+		addr, _ := vnext["address"].(string)
+		port := getInt(vnext["port"], 443)
+		ob["server"] = addr
+		ob["server_port"] = port
+
+		usersList, _ := vnext["users"].([]interface{})
+		if len(usersList) > 0 {
+			u, _ := usersList[0].(map[string]interface{})
+			id, _ := u["id"].(string)
+			ob["uuid"] = id
+			if flow, ok := u["flow"].(string); ok && flow != "" {
+				ob["flow"] = flow
+			}
+		}
+
+	case "vmess":
+		ob["type"] = "vmess"
+		vnextList, _ := settings["vnext"].([]interface{})
+		if len(vnextList) == 0 {
+			return nil, fmt.Errorf("vmess has no vnext")
+		}
+		vnext, _ := vnextList[0].(map[string]interface{})
+		addr, _ := vnext["address"].(string)
+		port := getInt(vnext["port"], 443)
+		ob["server"] = addr
+		ob["server_port"] = port
+
+		usersList, _ := vnext["users"].([]interface{})
+		if len(usersList) > 0 {
+			u, _ := usersList[0].(map[string]interface{})
+			id, _ := u["id"].(string)
+			ob["uuid"] = id
+			alterId := getInt(u["alterId"], 0)
+			ob["alter_id"] = alterId
+			sec, _ := u["security"].(string)
+			if sec == "" {
+				sec = "auto"
+			}
+			ob["security"] = sec
+		}
+
+	case "trojan":
+		ob["type"] = "trojan"
+		serversList, _ := settings["servers"].([]interface{})
+		if len(serversList) == 0 {
+			return nil, fmt.Errorf("trojan has no servers")
+		}
+		srv, _ := serversList[0].(map[string]interface{})
+		addr, _ := srv["address"].(string)
+		port := getInt(srv["port"], 443)
+		ob["server"] = addr
+		ob["server_port"] = port
+		pwd, _ := srv["password"].(string)
+		ob["password"] = pwd
+
+	case "shadowsocks":
+		ob["type"] = "shadowsocks"
+		serversList, _ := settings["servers"].([]interface{})
+		if len(serversList) == 0 {
+			return nil, fmt.Errorf("shadowsocks has no servers")
+		}
+		srv, _ := serversList[0].(map[string]interface{})
+		addr, _ := srv["address"].(string)
+		port := getInt(srv["port"], 8388)
+		ob["server"] = addr
+		ob["server_port"] = port
+		method, _ := srv["method"].(string)
+		pwd, _ := srv["password"].(string)
+		ob["method"] = method
+		ob["password"] = pwd
+
+	default:
+		ob["type"] = proto
+		if srv, ok := settings["address"].(string); ok {
+			ob["server"] = srv
+		}
+		if prt, ok := settings["port"]; ok {
+			ob["server_port"] = getInt(prt, 443)
+		}
+	}
+
+	if streamSettings != nil {
+		net, _ := streamSettings["network"].(string)
+		sec, _ := streamSettings["security"].(string)
+
+		switch strings.ToLower(net) {
+		case "ws":
+			wsMap := map[string]interface{}{"type": "ws"}
+			if wsSettings, ok := streamSettings["wsSettings"].(map[string]interface{}); ok {
+				if p, ok := wsSettings["path"].(string); ok {
+					wsMap["path"] = p
+				}
+				if h, ok := wsSettings["headers"].(map[string]interface{}); ok {
+					wsMap["headers"] = h
+				}
+			}
+			ob["transport"] = wsMap
+		case "grpc":
+			grpcMap := map[string]interface{}{"type": "grpc"}
+			if grpcSettings, ok := streamSettings["grpcSettings"].(map[string]interface{}); ok {
+				if sn, ok := grpcSettings["serviceName"].(string); ok {
+					grpcMap["service_name"] = sn
+				}
+			}
+			ob["transport"] = grpcMap
+		case "httpupgrade":
+			huMap := map[string]interface{}{"type": "httpupgrade"}
+			if huSettings, ok := streamSettings["httpupgradeSettings"].(map[string]interface{}); ok {
+				if p, ok := huSettings["path"].(string); ok {
+					huMap["path"] = p
+				}
+				if h, ok := huSettings["host"].(string); ok {
+					huMap["host"] = h
+				}
+			}
+			ob["transport"] = huMap
+		}
+
+		if strings.EqualFold(sec, "tls") {
+			tlsMap := map[string]interface{}{"enabled": true}
+			if tlsSettings, ok := streamSettings["tlsSettings"].(map[string]interface{}); ok {
+				if sn, ok := tlsSettings["serverName"].(string); ok && sn != "" {
+					tlsMap["server_name"] = sn
+				}
+				if fp, ok := tlsSettings["fingerprint"].(string); ok && fp != "" {
+					tlsMap["utls"] = map[string]interface{}{
+						"enabled":     true,
+						"fingerprint": fp,
+					}
+				}
+				if alpn, ok := tlsSettings["alpn"].([]interface{}); ok && len(alpn) > 0 {
+					tlsMap["alpn"] = alpn
+				}
+			}
+			ob["tls"] = tlsMap
+		} else if strings.EqualFold(sec, "reality") {
+			tlsMap := map[string]interface{}{"enabled": true}
+			realityMap := map[string]interface{}{"enabled": true}
+			if realitySettings, ok := streamSettings["realitySettings"].(map[string]interface{}); ok {
+				if sn, ok := realitySettings["serverName"].(string); ok && sn != "" {
+					tlsMap["server_name"] = sn
+				}
+				if fp, ok := realitySettings["fingerprint"].(string); ok && fp != "" {
+					tlsMap["utls"] = map[string]interface{}{
+						"enabled":     true,
+						"fingerprint": fp,
+					}
+				}
+				if pbk, ok := realitySettings["publicKey"].(string); ok {
+					realityMap["public_key"] = pbk
+				}
+				if sid, ok := realitySettings["shortId"].(string); ok {
+					realityMap["short_id"] = sid
+				}
+				if spx, ok := realitySettings["spiderX"].(string); ok {
+					realityMap["spider_x"] = spx
+				}
+			}
+			tlsMap["reality"] = realityMap
+			ob["tls"] = tlsMap
+		}
+	}
+
+	return ob, nil
+}
+
+func convertClashProxyToSingbox(p map[string]interface{}) (Outbound, error) {
+	name, _ := p["name"].(string)
+	tp, _ := p["type"].(string)
+	server, _ := p["server"].(string)
+	port := getInt(p["port"], 443)
+	if server == "" || tp == "" {
+		return nil, fmt.Errorf("invalid clash proxy")
+	}
+
+	ob := Outbound{
+		"tag":         name,
+		"server":      server,
+		"server_port": port,
+	}
+
+	switch strings.ToLower(tp) {
+	case "ss":
+		ob["type"] = "shadowsocks"
+		ob["method"], _ = p["cipher"].(string)
+		ob["password"], _ = p["password"].(string)
+	case "vless":
+		ob["type"] = "vless"
+		ob["uuid"], _ = p["uuid"].(string)
+		if flow, ok := p["flow"].(string); ok && flow != "" {
+			ob["flow"] = flow
+		}
+	case "vmess":
+		ob["type"] = "vmess"
+		ob["uuid"], _ = p["uuid"].(string)
+		ob["alter_id"] = getInt(p["alterId"], 0)
+		ob["security"], _ = p["cipher"].(string)
+		if ob["security"] == "" {
+			ob["security"] = "auto"
+		}
+	case "trojan":
+		ob["type"] = "trojan"
+		ob["password"], _ = p["password"].(string)
+	case "hysteria2", "hy2":
+		ob["type"] = "hysteria2"
+		ob["password"], _ = p["password"].(string)
+	default:
+		ob["type"] = tp
+	}
+
+	tlsVal, _ := p["tls"].(bool)
+	sni, _ := p["servername"].(string)
+	if sni == "" {
+		sni, _ = p["sni"].(string)
+	}
+
+	if tlsVal || sni != "" || p["reality-opts"] != nil {
+		tlsMap := map[string]interface{}{
+			"enabled": true,
+		}
+		if sni != "" {
+			tlsMap["server_name"] = sni
+		}
+		if fp, ok := p["client-fingerprint"].(string); ok && fp != "" {
+			tlsMap["utls"] = map[string]interface{}{
+				"enabled":     true,
+				"fingerprint": fp,
+			}
+		}
+		if ro, ok := p["reality-opts"].(map[string]interface{}); ok {
+			realityMap := map[string]interface{}{"enabled": true}
+			if pbk, ok := ro["public-key"].(string); ok {
+				realityMap["public_key"] = pbk
+			}
+			if sid, ok := ro["short-id"].(string); ok {
+				realityMap["short_id"] = sid
+			}
+			tlsMap["reality"] = realityMap
+		}
+		ob["tls"] = tlsMap
+	}
+
+	net, _ := p["network"].(string)
+	switch strings.ToLower(net) {
+	case "ws":
+		wsMap := map[string]interface{}{"type": "ws"}
+		if wo, ok := p["ws-opts"].(map[string]interface{}); ok {
+			if path, ok := wo["path"].(string); ok {
+				wsMap["path"] = path
+			}
+			if headers, ok := wo["headers"].(map[string]interface{}); ok {
+				wsMap["headers"] = headers
+			}
+		}
+		ob["transport"] = wsMap
+	case "grpc":
+		grpcMap := map[string]interface{}{"type": "grpc"}
+		if goOpts, ok := p["grpc-opts"].(map[string]interface{}); ok {
+			if sn, ok := goOpts["grpc-service-name"].(string); ok {
+				grpcMap["service_name"] = sn
+			}
+		}
+		ob["transport"] = grpcMap
+	}
+
+	return ob, nil
+}
+
+func parseJSONSubscription(content string) ([]Outbound, error) {
+	var arr []interface{}
+	if err := json.Unmarshal([]byte(content), &arr); err == nil {
+		var result []Outbound
+		for _, item := range arr {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			remarks, _ := m["remarks"].(string)
+			if outboundsRaw, ok := m["outbounds"].([]interface{}); ok {
+				for _, obRaw := range outboundsRaw {
+					if obMap, ok := obRaw.(map[string]interface{}); ok {
+						if converted, err := convertXrayOutboundToSingbox(obMap, remarks); err == nil {
+							result = append(result, converted)
+						}
+					}
+				}
+				continue
+			}
+
+			if tp, ok := m["type"].(string); ok && tp != "" {
+				if tp != "direct" && tp != "block" && tp != "dns" && tp != "selector" && tp != "urltest" {
+					result = append(result, Outbound(m))
+					continue
+				}
+			}
+
+			if _, ok := m["server"].(string); ok {
+				if converted, err := convertClashProxyToSingbox(m); err == nil {
+					result = append(result, converted)
+					continue
+				}
+			}
+		}
+		if len(result) > 0 {
+			return result, nil
+		}
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &obj); err == nil {
+		var result []Outbound
+		if outboundsRaw, ok := obj["outbounds"].([]interface{}); ok {
+			remarks, _ := obj["remarks"].(string)
+			for _, obRaw := range outboundsRaw {
+				if obMap, ok := obRaw.(map[string]interface{}); ok {
+					if _, hasProto := obMap["protocol"]; hasProto {
+						if converted, err := convertXrayOutboundToSingbox(obMap, remarks); err == nil {
+							result = append(result, converted)
+						}
+					} else if tp, ok := obMap["type"].(string); ok && tp != "" {
+						if tp != "direct" && tp != "block" && tp != "dns" && tp != "selector" && tp != "urltest" {
+							result = append(result, Outbound(obMap))
+						}
+					}
+				}
+			}
+		}
+
+		if proxiesRaw, ok := obj["proxies"].([]interface{}); ok {
+			for _, pRaw := range proxiesRaw {
+				if pMap, ok := pRaw.(map[string]interface{}); ok {
+					if converted, err := convertClashProxyToSingbox(pMap); err == nil {
+						result = append(result, converted)
+					}
+				}
+			}
+		}
+
+		if len(result) > 0 {
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no supported proxy structures found in JSON")
+}
+
 func parseLink(line string) ([]Outbound, error) {
 	line = strings.TrimSpace(line)
 	if strings.Contains(line, "\n") || strings.Contains(line, "\r") {
 		return parseMultiple(line)
+	}
+
+	if strings.HasPrefix(line, "[") || strings.HasPrefix(line, "{") {
+		if obs, err := parseJSONSubscription(line); err == nil && len(obs) > 0 {
+			return obs, nil
+		}
 	}
 
 	if strings.HasPrefix(line, "happ://") {
@@ -217,7 +635,7 @@ func parseLink(line string) ([]Outbound, error) {
 		if strings.HasPrefix(decrypted, "http://") || strings.HasPrefix(decrypted, "https://") {
 			return fetchSubscription(decrypted)
 		}
-		// Otherwise it might be lines of links
+		// Otherwise it might be lines of links or JSON
 		return parseMultiple(decrypted)
 	}
 
@@ -242,14 +660,21 @@ func parseLink(line string) ([]Outbound, error) {
 	}
 
 	// Try base64 decoded
-	if b, err := base64.StdEncoding.DecodeString(line); err == nil {
-		return parseMultiple(string(b))
+	if decoded, ok := tryBase64Decode(line); ok {
+		return parseMultiple(decoded)
 	}
 
 	return nil, fmt.Errorf("unknown link protocol: %s", line)
 }
 
 func parseMultiple(content string) ([]Outbound, error) {
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+		if obs, err := parseJSONSubscription(trimmed); err == nil && len(obs) > 0 {
+			return obs, nil
+		}
+	}
+
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
 	lines := strings.Split(content, "\n")
@@ -292,8 +717,8 @@ func fetchSubscription(subURL string) ([]Outbound, error) {
 		return nil, err
 	}
 	content := string(data)
-	if decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(content)); err == nil {
-		content = string(decoded)
+	if decoded, ok := tryBase64Decode(content); ok {
+		content = decoded
 	}
 	return parseMultiple(content)
 }
