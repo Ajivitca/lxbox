@@ -227,6 +227,7 @@ lxbox
 | Команда | Описание |
 |---|---|
 | `lxbox import '<ссылка>'` | Импортировать Happ, VLESS, Hy2, AWG или подписку |
+| `lxbox hwid [show\|preset\|random\|set]` | Просмотр и настройка HardwareID (HWID) и заголовков клиента |
 | `lxbox iface [0-5] [add\|del]` | Включить или удалить системный интерфейс Proxy0..Proxy5 в KeeneticOS |
 | `lxbox iface` | Показать текущий статус интерфейсов Proxy0..Proxy5 |
 | `lxbox status` | Показать статус службы, PID, память, порты и интерфейсы |
@@ -238,6 +239,32 @@ lxbox
 | `lxbox stop` | Остановить службу |
 | `lxbox start` | Запустить службу |
 | `lxbox uninstall` | Запустить деинсталляцию |
+
+---
+
+## 📱 Настройка HardwareID (HWID) и заголовков устройства
+
+LxBox позволяет маскировать роутер под различные клиентские устройства при скачивании и обновлении подписок у провайдеров.
+
+### В веб-интерфейсе (`http://192.168.1.1:9095`, вкладка «📱 Профиль & HWID»):
+* **Готовые шаблоны в 1 клик:**
+  * **`📱 LxBox Android` (по умолчанию)**: `User-Agent: LxBox/2.25.18/android`, `X-Device-OS: Android`, `X-HWID: e6ce...`, `X-Device-Model: Pixel 8`, `X-Device-Locale: ru`
+  * **`🍏 Happ iOS`**: `User-Agent: Happ/4.6.0/ios/...`, `X-Device-OS: iOS`, `X-HWID: 4e03f677f4766c43`, `X-Device-Model: iPhone 15 Pro`
+  * **`💻 Windows 11`**: `X-HWID: e6ce...`, `X_Device_OS: Windows`, `X_Ver_OS: 11_10.0.26200`, `X_Device_model: hsan_x86_64`
+* **Генерация случайного HWID:** кнопка `🎲 Случайный HWID` мгновенно генерирует новый уникальный 32-значный hex HWID.
+* **Свободное редактирование:** текстовое поле понимает любые заголовки в формате `Ключ: Значение`, автоматически поддерживая форматы как с дефисом (`X-Device-OS`), так и с подчеркиванием (`X_Device_OS`).
+* **Контроль в логах:** при каждом обращении к серверу подписки в лог ватчдога и системный журнал записывается:
+  `Передача X-HWID: <hwid> (OS: <os>, Model: <model>, заголовков: <count>)`.
+
+### Через консоль (`lxbox hwid`):
+```sh
+lxbox hwid show                      # Показать текущий профиль и HWID
+lxbox hwid preset android            # Применить профиль по умолчанию (Android)
+lxbox hwid preset ios                # Применить профиль Happ iOS (iPhone 15 Pro)
+lxbox hwid preset windows            # Применить профиль Windows 11
+lxbox hwid random                    # Сгенерировать новый случайный HWID
+lxbox hwid set 'X-HWID: ...'         # Задать произвольные заголовки
+```
 
 ---
 

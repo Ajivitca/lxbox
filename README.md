@@ -227,6 +227,7 @@ lxbox
 | Command | Description |
 |---|---|
 | `lxbox import '<link>'` | Ingest Happ, VLESS, Hy2, AWG, or subscription URLs |
+| `lxbox hwid [show\|preset\|random\|set]` | Manage HardwareID (HWID) and client device headers |
 | `lxbox iface [0-5] [add\|del]` | Enable or remove KeeneticOS Proxy0..Proxy5 system interfaces |
 | `lxbox iface` | Show current status of Proxy0..Proxy5 interfaces |
 | `lxbox status` | Show service status, PID, memory usage, ports, and interfaces |
@@ -238,6 +239,32 @@ lxbox
 | `lxbox stop` | Stop LxBox service |
 | `lxbox start` | Start LxBox service |
 | `lxbox uninstall` | Run complete uninstallation |
+
+---
+
+## 📱 HardwareID (HWID) & Client Profile Settings
+
+LxBox supports custom client fingerprinting and device headers when downloading or refreshing subscriptions from providers.
+
+### In the Web UI (`http://192.168.1.1:9095`, «📱 Профиль & HWID» tab):
+* **One-Click Presets:**
+  * **`📱 LxBox Android` (Default)**: `User-Agent: LxBox/2.25.18/android`, `X-Device-OS: Android`, `X-HWID: e6ce...`, `X-Device-Model: Pixel 8`, `X-Device-Locale: ru`
+  * **`🍏 Happ iOS`**: `User-Agent: Happ/4.6.0/ios/...`, `X-Device-OS: iOS`, `X-HWID: 4e03f677f4766c43`, `X-Device-Model: iPhone 15 Pro`
+  * **`💻 Windows 11`**: `X-HWID: e6ce...`, `X_Device_OS: Windows`, `X_Ver_OS: 11_10.0.26200`, `X_Device_model: hsan_x86_64`
+* **Random HWID Generation:** Click `🎲 Случайный HWID` to generate a fresh 32-char hex HWID instantly.
+* **Flexible Format:** Accepts any multiline `Key: Value` format, supporting both dash (`X-Device-OS`) and underscore (`X_Device_OS`) conventions.
+* **Live Logging Verification:** Every subscription request logs the transmitted HWID:  
+  `Передача X-HWID: <hwid> (OS: <os>, Model: <model>, заголовков: <count>)`.
+
+### Via CLI (`lxbox hwid`):
+```sh
+lxbox hwid show                      # Show active profile and HWID
+lxbox hwid preset android            # Apply default Android profile
+lxbox hwid preset ios                # Apply Happ iOS (iPhone 15 Pro) profile
+lxbox hwid preset windows            # Apply Windows 11 profile
+lxbox hwid random                    # Generate new random HWID
+lxbox hwid set 'X-HWID: ...'         # Set custom headers
+```
 
 ---
 

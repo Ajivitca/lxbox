@@ -276,9 +276,14 @@ func fetchSubscription(subURL string) ([]Outbound, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "sing-box/1.14.4")
+
+	// Apply configured device profile & hardware ID headers
+	profile := GetDeviceProfile()
+	profile.ApplyToRequest(req)
+
 	resp, err := client.Do(req)
 	if err != nil {
+		LogEvent("fail", "Ошибка запроса подписки: %v", err)
 		return nil, fmt.Errorf("failed to fetch subscription: %w", err)
 	}
 	defer resp.Body.Close()
@@ -542,6 +547,72 @@ func main() {
 		}
 		out, _ := json.MarshalIndent(obs, "", "  ")
 		fmt.Println(string(out))
+
+	case "hwid":
+		if len(os.Args) < 3 || os.Args[2] == "show" {
+			p := GetDeviceProfile()
+			fmt.Printf("Active X-HWID: %s\n", p.HWID)
+			fmt.Printf("Device OS:     %s\n", p.DeviceOS)
+			fmt.Printf("Device Model:  %s\n", p.DeviceModel)
+			fmt.Printf("User-Agent:    %s\n", p.UserAgent)
+			fmt.Println("\nRaw Headers:")
+			fmt.Println(p.RawHeaders)
+			return
+		}
+		if os.Args[2] == "preset" && len(os.Args) >= 4 {
+			var tpl string
+			switch strings.ToLower(os.Args[3]) {
+			case "android":
+				tpl = PresetLxBoxAndroid
+			case "ios":
+				tpl = PresetHappIOS
+			case "windows":
+				tpl = PresetWindows
+			default:
+				fmt.Printf("Unknown preset: %s (choose: android, ios, windows)\n", os.Args[3])
+				os.Exit(1)
+			}
+			p, err := UpdateDeviceProfile(tpl)
+			if err != nil {
+				fmt.Printf("Error saving preset: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("[+] Applied preset '%s'! Active X-HWID: %s\n", os.Args[3], p.HWID)
+			return
+		}
+		if os.Args[2] == "set" && len(os.Args) >= 4 {
+			p, err := UpdateDeviceProfile(os.Args[3])
+			if err != nil {
+				fmt.Printf("Error saving HWID headers: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("[+] HWID headers updated successfully! Active X-HWID: %s\n", p.HWID)
+			return
+		}
+		if os.Args[2] == "random" {
+			p := GetDeviceProfile()
+			newHWID := GenerateRandomHWID()
+			var newRaw string
+			if strings.Contains(strings.ToLower(p.RawHeaders), "hwid") {
+				lines := strings.Split(p.RawHeaders, "\n")
+				for i, l := range lines {
+					if strings.Contains(strings.ToLower(l), "hwid") {
+						lines[i] = "X-HWID: " + newHWID
+					}
+				}
+				newRaw = strings.Join(lines, "\n")
+			} else {
+				newRaw = "X-HWID: " + newHWID + "\n" + p.RawHeaders
+			}
+			p, err := UpdateDeviceProfile(newRaw)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("[+] Generated new random X-HWID: %s\n", p.HWID)
+			return
+		}
+		fmt.Println("Usage: lxbox-helper hwid [show | preset <android|ios|windows> | set '<headers>' | random]")
 
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])

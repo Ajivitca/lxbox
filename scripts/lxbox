@@ -211,6 +211,15 @@ case "$1" in
         shift
         cmd_iface "$@"
         ;;
+    hwid)
+        shift
+        if [ -x "$HELPER_BIN" ]; then
+            "$HELPER_BIN" hwid "$@"
+        else
+            echo -e "${RED}Error: $HELPER_BIN not found or not executable!${NC}"
+            exit 1
+        fi
+        ;;
     test)
         cmd_test
         ;;
@@ -229,6 +238,7 @@ case "$1" in
         echo -e "\n${YELLOW}Commands:${NC}"
         echo "  lxbox import '<link>'   - Import Happ, VLESS, Hy2, AWG, or sub link"
         echo "  lxbox web               - Show Web UI and dashboard links"
+        echo "  lxbox hwid [command]    - Manage HardwareID and client device headers"
         echo "  lxbox iface [add|del]   - Manage KeeneticOS Proxy0 network interface"
         echo "  lxbox test              - Test proxy connectivity"
         echo "  lxbox start             - Start LxBox service"

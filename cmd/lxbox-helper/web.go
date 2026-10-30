@@ -401,6 +401,48 @@ func runWebServer(listenAddr string, configPath string) error {
 		}
 	})
 
+	// 6. Device Profile & HWID APIs
+	http.HandleFunc("/api/device_profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			profile := GetDeviceProfile()
+			json.NewEncoder(w).Encode(profile)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var req struct {
+				RawHeaders string `json:"raw_headers"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid JSON"})
+				return
+			}
+			p, err := UpdateDeviceProfile(req.RawHeaders)
+			if err != nil {
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+				return
+			}
+			LogEvent("info", fmt.Sprintf("Обновлен профиль устройства: HWID=%s (%s %s)", p.HWID, p.DeviceOS, p.DeviceModel))
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"message": fmt.Sprintf("Профиль устройства сохранен! Активный HWID: %s", p.HWID),
+				"profile": p,
+			})
+			return
+		}
+		http.Error(w, `{"success":false,"message":"GET or POST required"}`, http.StatusMethodNotAllowed)
+	})
+
+	http.HandleFunc("/api/device_profile/presets", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"android":     PresetLxBoxAndroid,
+			"ios":         PresetHappIOS,
+			"windows":     PresetWindows,
+			"random_hwid": GenerateRandomHWID(),
+		})
+	})
+
 	fmt.Printf("[+] LxBox Web & Watchdog Server listening on http://%s\n", listenAddr)
 	server := &http.Server{
 		Addr:         listenAddr,
@@ -786,6 +828,7 @@ const htmlPage = `<!DOCTYPE html>
       <button class="tab-btn active" onclick="switchTab('subsTab', this)">📑 Подписки & Узлы (<span id="subsCountBadge">0</span>/5)</button>
       <button class="tab-btn" onclick="switchTab('watchdogTab', this)">🐕 Ватчдог & Мониторинг</button>
       <button class="tab-btn" onclick="switchTab('ifacesTab', this)">🔌 Сетевые интерфейсы (Proxy0..4)</button>
+      <button class="tab-btn" onclick="switchTab('hwidTab', this)">📱 Профиль & HWID</button>
       <button class="tab-btn" onclick="switchTab('statusTab', this)">⚙️ Ядро & Служба</button>
     </div>
 
@@ -898,6 +941,60 @@ https://grok.ai</textarea>
       </div>
     </div>
 
+    <!-- TAB 5: Device Profile & HWID -->
+    <div id="hwidTab" class="tab-content">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span>📱 Настройка заголовков & HWID</span></div>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+            Укажите заголовки клиента, передаваемые при скачивании и обновлении подписок. Поддерживаются разделители <code>:</code> и стили с дефисом (<code>X-HWID</code>) или подчеркиванием (<code>X_Device_OS</code>).
+          </p>
+
+          <div style="margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <span style="font-size: 12px; color: var(--text-muted); align-self: center; margin-right: 4px;">Шаблоны:</span>
+            <button class="btn-secondary" style="font-size: 12px; padding: 4px 10px;" onclick="applyHwidPreset('android')">📱 LxBox Android</button>
+            <button class="btn-secondary" style="font-size: 12px; padding: 4px 10px;" onclick="applyHwidPreset('ios')">🍏 Happ iOS (iPhone 15)</button>
+            <button class="btn-secondary" style="font-size: 12px; padding: 4px 10px;" onclick="applyHwidPreset('windows')">💻 Windows 11</button>
+            <button class="btn-secondary" style="font-size: 12px; padding: 4px 10px; color: var(--accent); border-color: rgba(139,92,246,0.4);" onclick="generateRandomHwid()">🎲 Случайный HWID</button>
+          </div>
+
+          <textarea id="hwidHeadersInput" style="height: 190px; font-family: monospace; font-size: 12px; line-height: 1.4;" placeholder="User-Agent: LxBox/2.25.18/android&#10;X-Device-OS: Android&#10;X-HWID: e6ce21f5efaa40b99711058bd35ba999"></textarea>
+
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn-success" onclick="saveDeviceProfile()">💾 Сохранить заголовки</button>
+            <button class="btn-secondary" onclick="applyHwidPreset('android')">🔄 Сбросить к Android</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span>🔍 Распознанный профиль клиента</span></div>
+            <span class="badge ok" id="profileCountBadge">0 заголовков</span>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <tr><td style="padding: 6px 0; color: var(--text-muted); width: 140px;">Активный X-HWID:</td><td id="dispProfileHWID" style="font-family: monospace; font-weight: 600; color: var(--primary); word-break: break-all;">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">ОС устройства:</td><td id="dispProfileOS" style="font-weight: 500;">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">Модель:</td><td id="dispProfileModel">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">Локаль (Язык):</td><td id="dispProfileLocale">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">Версия ОС:</td><td id="dispProfileVerOS">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">Версия приложения:</td><td id="dispProfileAppVer">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">User-Agent:</td><td id="dispProfileUA" style="font-family: monospace; font-size: 12px; word-break: break-all;">—</td></tr>
+            <tr><td style="padding: 6px 0; color: var(--text-muted);">Обновлено:</td><td id="dispProfileUpdated" style="font-size: 12px; color: var(--text-muted);">—</td></tr>
+          </table>
+
+          <div style="margin-top: 14px; padding: 10px; background: #070a12; border-radius: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+            <b>ℹ️ Мониторинг передачи HWID:</b><br/>
+            При каждом запросе подписки в лог ватчдога записывается событие:
+            <code style="color: #38bdf8; display: block; margin-top: 4px;">Передача X-HWID: &lt;ваш-hwid&gt; (OS: ..., Model: ...)</code>
+            Вы можете проконтролировать передачу во вкладке «Ватчдог & Мониторинг» или по команде <code>lxbox log</code>.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB 4: Core & Service Status -->
     <div id="statusTab" class="tab-content">
       <div class="card">
@@ -945,6 +1042,7 @@ https://grok.ai</textarea>
       if (tabId === "watchdogTab") loadWatchdog();
       if (tabId === "ifacesTab") loadInterfaces();
       if (tabId === "subsTab") loadSubscriptions();
+      if (tabId === "hwidTab") loadDeviceProfile();
     }
 
     async function loadStatus() {
@@ -1235,6 +1333,72 @@ https://grok.ai</textarea>
       } catch(e) { showAlert(e.message, false); }
     }
 
+    const HWID_PRESETS = {
+      android: "User-Agent: LxBox/2.25.18/android\nX-Device-OS: Android\nX-HWID: e6ce21f5efaa40b99711058bd35ba999\nX-Ver-OS: 14\nX-Device-Model: Pixel 8\nX-Device-Locale: ru\nX-App-Version: 2.25.18",
+      ios: "User-Agent: Happ/4.6.0/ios/1792157899\nX-Device-OS: iOS\nX-HWID: 4e03f677f4766c43\nX-Device-Locale: ru\nX-Ver-OS: 18.1\nX-App-Version: 4.6.0\nX-Device-Model: iPhone 15 Pro",
+      windows: "X-HWID: e6ce21f5efaa40b99711058bd35ba999\nX_Device_OS: Windows\nX_Ver_OS: 11_10.0.26200\nX_Device_model: hsan_x86_64\nX_Device_Locale: RU"
+    };
+
+    async function loadDeviceProfile() {
+      try {
+        const res = await fetch("/api/device_profile");
+        const p = await res.json();
+        if (p) {
+          const textarea = document.getElementById("hwidHeadersInput");
+          if (!textarea.value || document.activeElement !== textarea) {
+            textarea.value = p.raw_headers || "";
+          }
+          document.getElementById("dispProfileHWID").innerText = p.hwid || "—";
+          document.getElementById("dispProfileOS").innerText = p.device_os || "—";
+          document.getElementById("dispProfileModel").innerText = p.device_model || "—";
+          document.getElementById("dispProfileLocale").innerText = p.device_locale || "—";
+          document.getElementById("dispProfileVerOS").innerText = p.ver_os || "—";
+          document.getElementById("dispProfileAppVer").innerText = p.app_version || "—";
+          document.getElementById("dispProfileUA").innerText = p.user_agent || "—";
+          document.getElementById("dispProfileUpdated").innerText = p.last_updated ? new Date(p.last_updated).toLocaleString() : "—";
+          const count = Object.keys(p.headers || {}).length;
+          document.getElementById("profileCountBadge").innerText = count + " заголовков";
+        }
+      } catch(e) { console.error(e); }
+    }
+
+    async function saveDeviceProfile() {
+      const raw = document.getElementById("hwidHeadersInput").value.trim();
+      if (!raw) {
+        showAlert("Заголовки не могут быть пустыми!", false);
+        return;
+      }
+      try {
+        const res = await fetch("/api/device_profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ raw_headers: raw })
+        });
+        const data = await res.json();
+        showAlert(data.message, data.success);
+        loadDeviceProfile();
+      } catch(e) { showAlert("Ошибка: " + e.message, false); }
+    }
+
+    function applyHwidPreset(type) {
+      if (HWID_PRESETS[type]) {
+        document.getElementById("hwidHeadersInput").value = HWID_PRESETS[type];
+      }
+    }
+
+    function generateRandomHwid() {
+      const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      const el = document.getElementById("hwidHeadersInput");
+      let val = el.value;
+      const regex = /^(X[-_]HWID:\s*)(.*)$/im;
+      if (regex.test(val)) {
+        el.value = val.replace(regex, "$1" + hex);
+      } else {
+        el.value = "X-HWID: " + hex + "\n" + val;
+      }
+    }
+
     function escapeHTML(str) {
       if (!str) return '';
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1242,6 +1406,7 @@ https://grok.ai</textarea>
 
     loadStatus();
     loadSubscriptions();
+    loadDeviceProfile();
     setInterval(loadStatus, 5000);
     setInterval(() => {
       const activeTab = document.querySelector(".tab-content.active");

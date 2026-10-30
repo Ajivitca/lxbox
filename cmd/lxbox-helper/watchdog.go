@@ -105,6 +105,15 @@ func (w *WatchdogService) log(level, format string, args ...interface{}) {
 	fmt.Printf("[Watchdog %s] %s\n", strings.ToUpper(level), msg)
 }
 
+// LogEvent writes a log message to the active watchdog event stream
+func LogEvent(level, format string, args ...interface{}) {
+	if globalWatchdog != nil {
+		globalWatchdog.log(level, format, args...)
+	} else {
+		fmt.Printf("[%s] %s\n", strings.ToUpper(level), fmt.Sprintf(format, args...))
+	}
+}
+
 func (w *WatchdogService) GetStatus() map[string]interface{} {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
