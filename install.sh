@@ -68,9 +68,18 @@ mkdir -p /opt/sbin /opt/bin /opt/etc/lxbox /opt/etc/lxbox/ui /opt/etc/init.d /op
 
 # 4. Download Core Binary (sing-box-lx)
 info "Downloading sing-box-lx core binary..."
-curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" -o /opt/sbin/sing-box || \
-    wget -qO /opt/sbin/sing-box "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" || \
-    error "Failed to download sing-box core binary"
+if [ "$ARCH_FOLDER" = "armv7" ]; then
+    info "Downloading armv7 release package..."
+    curl -fSL --retry 3 "https://github.com/Ajivitca/lxbox/releases/download/v2.25.18/sing-box-linux-armv7.gz" -o /tmp/sing-box.gz 2>/dev/null || \
+        wget -qO /tmp/sing-box.gz "https://github.com/Ajivitca/lxbox/releases/download/v2.25.18/sing-box-linux-armv7.gz" || \
+        error "Failed to download sing-box armv7 binary"
+    gzip -d -c /tmp/sing-box.gz > /opt/sbin/sing-box
+    rm -f /tmp/sing-box.gz
+else
+    curl -fSL --retry 3 "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" -o /opt/sbin/sing-box || \
+        wget -qO /opt/sbin/sing-box "${REPO_RAW}/bin/${ARCH_FOLDER}/sing-box" || \
+        error "Failed to download sing-box core binary"
+fi
 chmod +x /opt/sbin/sing-box
 ln -sf /opt/sbin/sing-box /opt/bin/sing-box
 
