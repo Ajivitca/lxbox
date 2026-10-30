@@ -17,6 +17,14 @@ if [ -f /opt/etc/init.d/S99lxbox ]; then
     /opt/etc/init.d/S99lxbox stop 2>/dev/null || true
 fi
 killall -9 sing-box 2>/dev/null || true
+killall -9 lxbox-helper 2>/dev/null || true
+
+# Remove Keenetic interface Proxy0 if configured
+if which ndmc >/dev/null 2>&1; then
+    echo -e "${YELLOW}[*] Removing KeeneticOS Proxy0 interface...${NC}"
+    ndmc -c "no interface Proxy0" >/dev/null 2>&1 || true
+    ndmc -c "system configuration save" >/dev/null 2>&1 || true
+fi
 
 echo -e "${YELLOW}[*] Removing service scripts and binaries...${NC}"
 rm -f /opt/etc/init.d/S99lxbox
@@ -24,7 +32,7 @@ rm -f /opt/sbin/sing-box
 rm -f /opt/bin/sing-box
 rm -f /opt/bin/lxbox
 rm -f /opt/bin/lxbox-helper
-rm -f /opt/var/run/lxbox.pid
+rm -f /opt/var/run/lxbox.pid /opt/var/run/lxbox-web.pid
 
 echo -e "${YELLOW}[*] Backing up configuration...${NC}"
 if [ -d /opt/etc/lxbox ]; then

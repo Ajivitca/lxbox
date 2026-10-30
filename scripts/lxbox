@@ -40,11 +40,20 @@ cmd_status() {
         echo -e "Status:     ${RED}○ STOPPED${NC}"
     fi
 
-    echo -e "\n${CYAN}--- Network Ports ---${NC}"
-    echo -e "Clash API:  http://$(get_router_ip):9090"
-    echo -e "Web UI:     ${GREEN}http://$(get_router_ip):9090/ui${NC}"
-    echo -e "Mixed Proxy: 127.0.0.1:7890 (SOCKS5/HTTP)"
-    echo -e "SOCKS5:      127.0.0.1:10808"
+    echo -e "\n${CYAN}--- Web & Network Ports ---${NC}"
+    echo -e "Web Management: ${GREEN}http://$(get_router_ip):9095${NC} (Import links & subscriptions)"
+    echo -e "Dashboard UI:   ${CYAN}http://$(get_router_ip):9090/ui${NC} (MetaCubeXD node switcher)"
+    echo -e "Clash API:      http://$(get_router_ip):9090"
+    echo -e "Mixed Proxy:    127.0.0.1:7890 (SOCKS5/HTTP)"
+    echo -e "SOCKS5:         127.0.0.1:10808"
+
+    if which ndmc >/dev/null 2>&1; then
+        if ndmc -c "show interface Proxy0" 2>/dev/null | grep -q "Proxy0"; then
+            echo -e "Keenetic Proxy0: ${GREEN}● ACTIVE${NC} (Available in Connection Priorities & HydraRoute)"
+        else
+            echo -e "Keenetic Proxy0: ${YELLOW}○ NOT CONFIGURED${NC} (run 'lxbox iface add' to enable)"
+        fi
+    fi
 
     if [ -f "$CONFIG_FILE" ]; then
         echo -e "\n${CYAN}--- Active Outbounds ---${NC}"
@@ -94,9 +103,52 @@ cmd_test() {
 }
 
 cmd_web() {
-    echo -e "${GREEN}Web Dashboard URL:${NC}"
-    echo -e "  ${CYAN}http://$(get_router_ip):9090/ui${NC}\n"
-    echo "Tips: Open this URL in your browser to manage proxies, view traffic, and switch nodes."
+    echo -e "${GREEN}=== Web Interfaces ===${NC}"
+    echo -e "  Management & Import UI: ${CYAN}http://$(get_router_ip):9095${NC}"
+    echo -e "  MetaCubeXD Dashboard:   ${CYAN}http://$(get_router_ip):9090/ui${NC}"
+    echo -e "  AWG Manager:            ${CYAN}http://$(get_router_ip):2222${NC}\n"
+    echo "Tips: Open http://$(get_router_ip):9095 to import Happ/VLESS links directly in your browser!"
+}
+
+cmd_iface() {
+    ACTION="$1"
+    if ! which ndmc >/dev/null 2>&1; then
+        echo -e "${RED}Error: 'ndmc' utility not found. This command must be run on KeeneticOS!${NC}"
+        return 1
+    fi
+
+    case "$ACTION" in
+        add|enable|on)
+            echo -e "${YELLOW}[*] Configuring KeeneticOS interface Proxy0 for LxBox (127.0.0.1:10808)...${NC}"
+            ndmc -c "interface Proxy0" >/dev/null 2>&1
+            ndmc -c "interface Proxy0 description LxBox" >/dev/null 2>&1
+            ndmc -c "interface Proxy0 proxy proto socks5" >/dev/null 2>&1
+            ndmc -c "interface Proxy0 proxy upstream 127.0.0.1 10808" >/dev/null 2>&1
+            ndmc -c "interface Proxy0 proxy socks5-udp" >/dev/null 2>&1
+            ndmc -c "interface Proxy0 ip global auto" >/dev/null 2>&1
+            ndmc -c "interface Proxy0 up" >/dev/null 2>&1
+            ndmc -c "system configuration save" >/dev/null 2>&1
+            echo -e "${GREEN}[✔] Interface Proxy0 created and enabled!${NC}"
+            echo -e "Now Proxy0 is visible in KeeneticOS Connection Priorities, HydraRoute Neo, and AWG Manager."
+            ;;
+        del|disable|off|remove)
+            echo -e "${YELLOW}[*] Removing KeeneticOS interface Proxy0...${NC}"
+            ndmc -c "no interface Proxy0" >/dev/null 2>&1
+            ndmc -c "system configuration save" >/dev/null 2>&1
+            echo -e "${GREEN}[✔] Interface Proxy0 removed from KeeneticOS.${NC}"
+            ;;
+        status|show|*)
+            echo -e "${CYAN}=== Keenetic Interface Proxy0 Status ===${NC}"
+            STATUS=$(ndmc -c "show interface Proxy0" 2>/dev/null)
+            if echo "$STATUS" | grep -q "Proxy0" && ! echo "$STATUS" | grep -q "unable to find"; then
+                echo -e "Status: ${GREEN}● ACTIVE${NC}"
+                echo "$STATUS" | grep -E "description|state|proto|upstream|address" | sed 's/^[ \t]*/  /'
+            else
+                echo -e "Status: ${YELLOW}○ NOT CONFIGURED${NC}"
+                echo "Run 'lxbox iface add' to register LxBox as a KeeneticOS network interface."
+            fi
+            ;;
+    esac
 }
 
 case "$1" in
@@ -128,6 +180,10 @@ case "$1" in
     web|ui)
         cmd_web
         ;;
+    iface|interface)
+        shift
+        cmd_iface "$@"
+        ;;
     test)
         cmd_test
         ;;
@@ -145,7 +201,8 @@ case "$1" in
         cmd_status
         echo -e "\n${YELLOW}Commands:${NC}"
         echo "  lxbox import '<link>'   - Import Happ, VLESS, Hy2, AWG, or sub link"
-        echo "  lxbox web               - Show Web UI link"
+        echo "  lxbox web               - Show Web UI and dashboard links"
+        echo "  lxbox iface [add|del]   - Manage KeeneticOS Proxy0 network interface"
         echo "  lxbox test              - Test proxy connectivity"
         echo "  lxbox start             - Start LxBox service"
         echo "  lxbox stop              - Stop LxBox service"

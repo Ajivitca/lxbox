@@ -11,6 +11,9 @@ PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
 CONFIG="/opt/etc/lxbox/config.json"
 PIDFILE="/opt/var/run/lxbox.pid"
 LOGFILE="/opt/var/log/lxbox.log"
+WEBPIDFILE="/opt/var/run/lxbox-web.pid"
+WEBLOGFILE="/opt/var/log/lxbox-web.log"
+HELPER="/opt/bin/lxbox-helper"
 
 . /opt/etc/init.d/rc.func 2>/dev/null || true
 
@@ -31,27 +34,35 @@ start() {
     echo -n "Starting $DESC: "
     if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE" 2>/dev/null) 2>/dev/null; then
         echo "already running."
-        return 0
-    fi
-
-    if ! check_config; then
-        echo "failed (invalid config)."
-        return 1
-    fi
-
-    mkdir -p /opt/var/run /opt/var/log
-    # Run sing-box in background
-    /opt/sbin/sing-box $ARGS >> "$LOGFILE" 2>&1 &
-    PID=$!
-    echo $PID > "$PIDFILE"
-
-    sleep 1
-    if kill -0 $PID 2>/dev/null; then
-        echo "done (PID: $PID)."
     else
-        echo "failed to start! Check $LOGFILE"
-        rm -f "$PIDFILE"
-        return 1
+        if ! check_config; then
+            echo "failed (invalid config)."
+            return 1
+        fi
+
+        mkdir -p /opt/var/run /opt/var/log
+        # Run sing-box in background
+        /opt/sbin/sing-box $ARGS >> "$LOGFILE" 2>&1 &
+        PID=$!
+        echo $PID > "$PIDFILE"
+
+        sleep 1
+        if kill -0 $PID 2>/dev/null; then
+            echo "done (PID: $PID)."
+        else
+            echo "failed to start! Check $LOGFILE"
+            rm -f "$PIDFILE"
+            return 1
+        fi
+    fi
+
+    # Start Web Management companion (port 9095)
+    if [ -x "$HELPER" ]; then
+        if [ ! -f "$WEBPIDFILE" ] || ! kill -0 $(cat "$WEBPIDFILE" 2>/dev/null) 2>/dev/null; then
+            $HELPER web -addr 0.0.0.0:9095 -c "$CONFIG" >> "$WEBLOGFILE" 2>&1 &
+            echo $! > "$WEBPIDFILE"
+            echo "Starting LxBox Web Management: done (port 9095, PID: $(cat $WEBPIDFILE))."
+        fi
     fi
 }
 
@@ -70,6 +81,16 @@ stop() {
     fi
     killall -9 sing-box 2>/dev/null || true
     echo "done."
+
+    # Stop Web Management
+    if [ -f "$WEBPIDFILE" ]; then
+        WPID=$(cat "$WEBPIDFILE" 2>/dev/null)
+        if [ -n "$WPID" ] && kill -0 "$WPID" 2>/dev/null; then
+            kill "$WPID" 2>/dev/null
+        fi
+        rm -f "$WEBPIDFILE"
+    fi
+    killall lxbox-helper 2>/dev/null || true
 }
 
 restart() {
@@ -83,6 +104,12 @@ status() {
         echo "$DESC is running (PID: $(cat $PIDFILE))."
     else
         echo "$DESC is stopped."
+    fi
+
+    if [ -f "$WEBPIDFILE" ] && kill -0 $(cat "$WEBPIDFILE" 2>/dev/null) 2>/dev/null; then
+        echo "LxBox Web Management is running on port 9095 (PID: $(cat $WEBPIDFILE))."
+    else
+        echo "LxBox Web Management is stopped."
     fi
 }
 

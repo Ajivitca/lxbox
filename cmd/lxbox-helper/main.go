@@ -287,7 +287,99 @@ func fetchSubscription(subURL string) ([]Outbound, error) {
 	return parseMultiple(content)
 }
 
+func ensureConfigTemplate(configPath string) error {
+	if _, err := os.Stat(configPath); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return err
+	}
+	baseTemplate := `{
+  "log": {
+    "level": "info",
+    "output": "/opt/var/log/lxbox.log",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "remote-dns",
+        "type": "tls",
+        "server": "1.1.1.1",
+        "detour": "select"
+      },
+      {
+        "tag": "local-dns",
+        "type": "local",
+        "detour": "direct"
+      }
+    ],
+    "final": "local-dns",
+    "strategy": "prefer_ipv4"
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "0.0.0.0",
+      "listen_port": 7890
+    },
+    {
+      "type": "socks",
+      "tag": "socks-in",
+      "listen": "0.0.0.0",
+      "listen_port": 10808
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "select",
+      "outbounds": [
+        "direct"
+      ],
+      "default": "direct"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "local-dns",
+    "rules": [
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      }
+    ],
+    "final": "select"
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "0.0.0.0:9090",
+      "external_ui": "/opt/etc/lxbox/ui",
+      "secret": "",
+      "default_mode": "rule"
+    }
+  }
+}`
+	return os.WriteFile(configPath, []byte(baseTemplate), 0644)
+}
+
 func updateConfig(configPath string, newOutbounds []Outbound) error {
+	if err := ensureConfigTemplate(configPath); err != nil {
+		return fmt.Errorf("cannot initialize config %s: %w", configPath, err)
+	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("cannot read config %s: %w", configPath, err)
@@ -371,15 +463,27 @@ func main() {
 	importCmd := flag.NewFlagSet("import", flag.ExitOnError)
 	cfgPath := importCmd.String("c", "/opt/etc/lxbox/config.json", "Path to sing-box config.json")
 
+	webCmd := flag.NewFlagSet("web", flag.ExitOnError)
+	webAddr := webCmd.String("addr", "0.0.0.0:9095", "Listen address for web server")
+	webCfgPath := webCmd.String("c", "/opt/etc/lxbox/config.json", "Path to sing-box config.json")
+
 	if len(os.Args) < 2 {
 		fmt.Println("LxBox Router CLI Helper")
 		fmt.Println("Usage:")
 		fmt.Println("  lxbox-helper import '<happ/vless/sub-url>' [-c /path/to/config.json]")
 		fmt.Println("  lxbox-helper parse '<happ/vless/sub-url>'")
+		fmt.Println("  lxbox-helper web [-addr 0.0.0.0:9095] [-c /path/to/config.json]")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
+	case "web":
+		webCmd.Parse(os.Args[2:])
+		if err := runWebServer(*webAddr, *webCfgPath); err != nil {
+			fmt.Printf("Web server error: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "import":
 		if len(os.Args) < 3 {
 			fmt.Println("Error: link argument is required")
@@ -387,6 +491,11 @@ func main() {
 		}
 		link := os.Args[2]
 		importCmd.Parse(os.Args[3:])
+
+		if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
+			subFile := filepath.Join(filepath.Dir(*cfgPath), "subscription.txt")
+			_ = os.WriteFile(subFile, []byte(link), 0644)
+		}
 
 		obs, err := parseLink(link)
 		if err != nil {
@@ -396,91 +505,6 @@ func main() {
 		fmt.Printf("[+] Parsed %d outbound node(s):\n", len(obs))
 		for _, o := range obs {
 			fmt.Printf("    - %s (%s -> %s:%v)\n", o["tag"], o["type"], o["server"], o["server_port"])
-		}
-
-		if _, err := os.Stat(*cfgPath); os.IsNotExist(err) {
-			// If file doesn't exist, create directory and base template
-			os.MkdirAll(filepath.Dir(*cfgPath), 0755)
-			baseTemplate := `{
-  "log": {
-    "level": "info",
-    "output": "/opt/var/log/lxbox.log",
-    "timestamp": true
-  },
-  "dns": {
-    "servers": [
-      {
-        "tag": "remote-dns",
-        "type": "tls",
-        "server": "1.1.1.1",
-        "detour": "select"
-      },
-      {
-        "tag": "local-dns",
-        "type": "local",
-        "detour": "direct"
-      }
-    ],
-    "final": "local-dns",
-    "strategy": "prefer_ipv4"
-  },
-  "inbounds": [
-    {
-      "type": "mixed",
-      "tag": "mixed-in",
-      "listen": "0.0.0.0",
-      "listen_port": 7890
-    },
-    {
-      "type": "socks",
-      "tag": "socks-in",
-      "listen": "0.0.0.0",
-      "listen_port": 10808
-    }
-  ],
-  "outbounds": [
-    {
-      "type": "selector",
-      "tag": "select",
-      "outbounds": [
-        "direct"
-      ],
-      "default": "direct"
-    },
-    {
-      "type": "direct",
-      "tag": "direct"
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    }
-  ],
-  "route": {
-    "auto_detect_interface": true,
-    "default_domain_resolver": "local-dns",
-    "rules": [
-      {
-        "protocol": "dns",
-        "action": "hijack-dns"
-      },
-      {
-        "ip_is_private": true,
-        "outbound": "direct"
-      }
-    ],
-    "final": "select"
-  },
-  "experimental": {
-    "clash_api": {
-      "external_controller": "0.0.0.0:9090",
-      "external_ui": "/opt/etc/lxbox/ui",
-      "secret": "",
-      "default_mode": "rule"
-    }
-  }
-}`
-			os.WriteFile(*cfgPath, []byte(baseTemplate), 0644)
 		}
 
 		if err := updateConfig(*cfgPath, obs); err != nil {

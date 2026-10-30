@@ -111,14 +111,20 @@ lxbox import 'awg://...'
 
 ---
 
-## 🌐 Web Dashboard (MetaCubeXD)
+## 🌐 Web Interfaces
 
-Open in any web browser on your local network:
+LxBox for Keenetic provides two integrated web interfaces:
 
-👉 **`http://192.168.1.1:9090/ui`**  
-*(replace `192.168.1.1` with your router's LAN IP if customized)*
+### 1. Web Management & Importer Center (`:9095`)
+👉 **`http://192.168.1.1:9095`**
+* **In-Browser Link Import:** Paste encrypted Happ strings (`happ://crypt...`), VLESS Reality links, Hysteria2, or subscription URLs directly in your browser without opening SSH!
+* **Subscription Auto-Update:** Re-sync with remote provider subscriptions in one click.
+* **KeeneticOS Interface Switch (`Proxy0`):** Enable or remove the router network interface directly from the web page.
+* **Daemon Management:** Restart, stop, start, and validate configuration on the fly.
+* **Navigation Links:** Quick links to jump between MetaCubeXD (`:9090/ui`) and AWG Manager (`:2222`).
 
-### Web Dashboard Features:
+### 2. MetaCubeXD Dashboard (`:9090/ui`)
+👉 **`http://192.168.1.1:9090/ui`**
 * **Node Selection:** Switch active proxy nodes with a single click in the `select` group.
 * **Latency Testing (Ping):** Test real response times for all configured outbounds.
 * **Real-time Throughput Graphs:** Monitor upload and download speeds live (KB/s, MB/s).
@@ -126,40 +132,53 @@ Open in any web browser on your local network:
 
 ---
 
-## 🤝 Coexistence with AWG Manager
+## 🤝 Coexistence with AWG Manager & HydraRoute Neo
 
-If you have [hoaxisr/awg-manager](https://github.com/hoaxisr/awg-manager) running or plan to install it:
+Frequently Asked: *«Can I add LxBox as a plugin into AWG Manager, or replace AWG Manager's built-in sing-box?»*
 
-### 1. Zero Port Conflicts
-* **AWG Manager Web UI:** `http://192.168.1.1:2222`
-* **LxBox Web UI:** `http://192.168.1.1:9090/ui`
-* **LxBox Proxy Ports:**
-  * Mixed (SOCKS5/HTTP): `7890`
-  * SOCKS5: `10808`
-  * Clash REST API: `9090`
+### ⚠️ Why you should NOT replace sing-box inside AWG Manager:
+1. **Pinned Binary Verification:** AWG Manager is strictly pinned to its custom build (`hoaxisr/amnezia-box`) with SHA256 verification (`RequiredVersion = 1.15.0-alpha.13-awgm.35`). During updates, AWG Manager automatically overwrites `/opt/etc/awg-manager/singbox/sing-box` with its own build.
+2. **No Happ Decryption:** AWG Manager's parser does not have the RSA PKCS#1 v1.5 private keys required to decrypt Happ links (`happ://crypt...`), nor the XHTTP and post-quantum patches in `sing-box-lx`.
+3. **No External Plugin Architecture:** AWG Manager's web interface is a pre-compiled single binary.
 
-### 2. Integration Scenarios
+### ✅ Recommended Architecture: Zero-Collision Integration via `Proxy0`
+Instead of modifying AWG Manager, we register LxBox as an official **KeeneticOS network interface** (`interface Proxy0`):
 
-#### Scenario A: KeeneticOS Policy Routing (Recommended)
-AWG Manager provides AmneziaWG tunnel interfaces (`nwg0`, `awg0`).  
-In KeeneticOS Web UI (**"Network Rules" → "Connection Priorities"**):
-* High-bandwidth devices (Smart TV, game consoles, torrent clients) can route through AWG Manager.
-* Workstations or browsers needing VLESS / Reality / XHTTP to bypass advanced DPI connect through LxBox (`192.168.1.1:7890`).
-
-#### Scenario B: Chaining (Detour through AWG Manager)
-Route LxBox outbound traffic through an active AWG tunnel:
-In `/opt/etc/lxbox/config.json`:
-```json
-{
-  "type": "vless",
-  "tag": "MyNode",
-  "bind_interface": "nwg0",
-  ...
-}
+```
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │                           KeeneticOS                                   │
+ │                                                                        │
+ │  ┌───────────────────────┐             ┌─────────────────────────────┐ │
+ │  │      AWG Manager      │             │        LxBox Daemon         │ │
+ │  │    (Port 2222: Web)   │             │   (Port 9095: Web Import)   │ │
+ │  │   WireGuard Tunnels   │             │   (Port 9090: MetaCubeXD)   │ │
+ │  └───────────┬───────────┘             └──────────────┬──────────────┘ │
+ │              │ nwg0 / awg0                            │ SOCKS5 :10808  │
+ │              ▼                                        ▼                │
+ │       [AWG Interface]                      [Proxy0 Interface]          │
+ │              │                                        │                │
+ │              └───────────────────┬────────────────────┘                │
+ │                                  ▼                                     │
+ │                   HydraRoute Neo / Keenetic Policies                   │
+ │                     (Per-Domain Split Tunneling)                       │
+ └────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Scenario C: Direct AmneziaWG in LxBox
-The `sing-box-lx` core includes native `with_amneziawg` support. You can import AWG configurations directly into LxBox.
+#### Setup in 2 Easy Steps:
+
+1. **Enable the `Proxy0` Interface:**  
+   Click **«Enable Proxy0»** in the Web UI (`http://192.168.1.1:9095`) or run via SSH:
+   ```sh
+   lxbox iface add
+   ```
+   KeeneticOS creates an official system interface `Proxy0` pointing to LxBox SOCKS5 (`127.0.0.1:10808`).
+
+2. **Route Traffic in HydraRoute Neo or AWG Manager:**
+   * **In AWG Manager / HydraRoute Neo:** Open your domain lists (YouTube, Discord, RuTracker, blocked sites) and set the target to **`Proxy0`** or the policy containing `Proxy0`.
+   * **In KeeneticOS Web UI («Connection Priorities»):** `Proxy0` (LxBox) appears in the Internet connections list — drag it to any policy or assign it to specific home devices.
+
+**Major Advantage:**  
+Both AWG Manager and LxBox can be upgraded independently at any time without config collisions or file overwrites.
 
 ---
 
@@ -174,8 +193,9 @@ lxbox
 | Command | Description |
 |---|---|
 | `lxbox import '<link>'` | Ingest Happ, VLESS, Hy2, AWG, or subscription URLs |
-| `lxbox status` | Show service status, PID, memory usage, and active ports |
-| `lxbox web` | Display the Web Dashboard URL |
+| `lxbox iface [add\|del]` | Enable or remove KeeneticOS Proxy0 system interface |
+| `lxbox status` | Show service status, PID, memory usage, ports, and Proxy0 |
+| `lxbox web` | Display Web UI URLs (:9095, :9090, :2222) |
 | `lxbox test` | Test proxy connection and check latency |
 | `lxbox log` | Follow live service logs (`tail -f`) |
 | `lxbox check` | Validate syntax of `config.json` |
