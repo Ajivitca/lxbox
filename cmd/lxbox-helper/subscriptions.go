@@ -179,6 +179,14 @@ func (m *SubscriptionsManager) AddSubscription(name, urlOrContent string) (*Subs
 			port = v
 		}
 
+		if tp == "urltest" {
+			if childList, ok := o["outbounds"].([]string); ok {
+				srv = fmt.Sprintf("Автовыбор из %d узлов (urltest 30s)", len(childList))
+			} else {
+				srv = "Автовыбор узлов (urltest 30s)"
+			}
+		}
+
 		nodes = append(nodes, &NodeInfo{
 			Tag:           tag,
 			Type:          tp,
@@ -236,8 +244,12 @@ func (m *SubscriptionsManager) RefreshSubscription(id string) error {
 	}
 	subURL := targetSub.URL
 	prevPoolMap := make(map[string]bool)
+	prevActiveTag := ""
 	for _, n := range targetSub.Nodes {
 		prevPoolMap[n.Tag] = n.EnabledInPool
+		if n.IsActive {
+			prevActiveTag = n.Tag
+		}
 	}
 	m.mu.Unlock()
 
@@ -271,12 +283,28 @@ func (m *SubscriptionsManager) RefreshSubscription(id string) error {
 			enabledInPool = val
 		}
 
+		isActive := false
+		if prevActiveTag == tag {
+			isActive = true
+		} else if prevActiveTag == "" && i == 0 {
+			isActive = true
+		}
+
+		if tp == "urltest" {
+			if childList, ok := o["outbounds"].([]string); ok {
+				srv = fmt.Sprintf("Автовыбор из %d узлов (urltest 30s)", len(childList))
+			} else {
+				srv = "Автовыбор узлов (urltest 30s)"
+			}
+		}
+
 		newNodes = append(newNodes, &NodeInfo{
 			Tag:           tag,
 			Type:          tp,
 			Server:        srv,
 			ServerPort:    port,
 			EnabledInPool: enabledInPool,
+			IsActive:      isActive,
 			Status:        "unknown",
 			RawOutbound:   o,
 		})

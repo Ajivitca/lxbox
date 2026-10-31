@@ -1127,12 +1127,18 @@ https://grok.ai</textarea>
             const actStyle = n.is_active ? "background: var(--primary); color: #042f2e;" : "";
             const actLabel = n.is_active ? "★ Активен" : "Сделать акт.";
             const lat = n.last_latency_ms > 0 ? n.last_latency_ms + " ms" : "—";
+            const serverDisplay = (n.server_port > 0) ? escapeHTML(n.server) + ":" + n.server_port : escapeHTML(n.server);
+            const typeBadge = (n.type === "urltest") ?
+              "<span style='font-size: 10px; background: rgba(139,92,246,0.25); color: #c084fc; padding: 2px 6px; border-radius: 4px; font-weight: 600;'>⚡ AUTO</span>" :
+              "<span style='font-size: 11px; text-transform: uppercase; color: var(--accent);'>" + escapeHTML(n.type) + "</span>";
+            const tagStyle = (n.type === "urltest") ? "font-family: monospace; font-weight: 600; color: #38bdf8;" : "font-family: monospace; font-weight: 500;";
+
             rows += "<tr>" +
               "<td><input type='checkbox' " + chk + " onchange='togglePool(\"" + s.id + "\", \"" + escapeHTML(n.tag) + "\", this.checked)'></td>" +
               "<td><button class='btn-secondary' style='padding: 2px 8px; font-size: 11px; " + actStyle + "' onclick='setActiveNode(\"" + s.id + "\", \"" + escapeHTML(n.tag) + "\")'>" + actLabel + "</button></td>" +
-              "<td style='font-family: monospace; font-weight: 500;'>" + escapeHTML(n.tag) + "</td>" +
-              "<td><span style='font-size: 11px; text-transform: uppercase; color: var(--accent);'>" + escapeHTML(n.type) + "</span></td>" +
-              "<td style='font-size: 12px; color: var(--text-muted);'>" + escapeHTML(n.server) + ":" + n.server_port + "</td>" +
+              "<td style='" + tagStyle + "'>" + escapeHTML(n.tag) + "</td>" +
+              "<td>" + typeBadge + "</td>" +
+              "<td style='font-size: 12px; color: var(--text-muted);'>" + serverDisplay + "</td>" +
               "<td>" + renderStatusBadge(n) + "</td>" +
               "<td style='font-family: monospace;'>" + lat + "</td>" +
               "</tr>";

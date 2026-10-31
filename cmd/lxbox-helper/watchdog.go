@@ -290,7 +290,7 @@ func (w *WatchdogService) probeNodeClashDelay(nodeTag string) (bool, int) {
 	apiBase := w.cfg.ClashAPI
 	w.mu.RUnlock()
 
-	testURL := "https://www.google.com/generate_204"
+	testURL := "https://cp.cloudflare.com/generate_204"
 	probeURL := fmt.Sprintf("%s/proxies/%s/delay?timeout=5000&url=%s",
 		apiBase, url.PathEscape(nodeTag), url.QueryEscape(testURL))
 

@@ -618,7 +618,28 @@ func parseJSONSubscription(content string) ([]Outbound, error) {
 						}
 					}
 				}
-				for _, ob := range itemProxies {
+				if len(itemProxies) > 1 {
+					var childTags []string
+					for i, ob := range itemProxies {
+						childTag := fmt.Sprintf("%s #%d", remarks, i+1)
+						ob["tag"] = childTag
+						childTags = append(childTags, childTag)
+					}
+					autoTag := fmt.Sprintf("⚡ %s (Auto)", remarks)
+					urlTestOb := Outbound{
+						"type":      "urltest",
+						"tag":       autoTag,
+						"outbounds": childTags,
+						"url":       "http://www.gstatic.com/generate_204",
+						"interval":  "30s",
+						"tolerance": 50,
+					}
+					result = append(result, urlTestOb)
+					for _, ob := range itemProxies {
+						result = append(result, ob)
+					}
+				} else if len(itemProxies) == 1 {
+					ob := itemProxies[0]
 					ob["tag"] = dedupTag(remarks)
 					result = append(result, ob)
 				}
